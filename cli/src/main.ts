@@ -127,9 +127,8 @@ if (command === "--version" || command === "-v") {
                                  \`--revoke legacy\` retires the shared code of earlier versions
   set hostname <address>         Where the relay listens: 127.0.0.1 (this computer, the default) or 0.0.0.0
                                  (browsers on other computers can connect too, after pairing)
-  update [--check]               Update now: rerun whatever installed browse (the install script for a binary
-                                 install, npm install -g for an npm one); --check only says whether there's an
-                                 update. A git clone pulls the newer commits and runs setup again.
+  update [--check]               更新已禁用；显示按本地规则同步个人 fork 的指引。
+    --mode <on|notify|off>         仅保存历史设置，有效模式始终为 off。
   uninstall                      Remove everything install set up
 
 browse keeps its files in $XDG_CONFIG_HOME/browse, $XDG_DATA_HOME/browse, $XDG_STATE_HOME/browse and

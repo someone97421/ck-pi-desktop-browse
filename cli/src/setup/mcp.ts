@@ -3,7 +3,7 @@ import { createHash } from "node:crypto"
 import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs"
 import path from "node:path"
 import { applyEdits, modify, parse, type ParseError } from "jsonc-parser"
-import { npmGlobalRoot, runCommand, installedVersion } from "../update/auto-update.ts"
+import { npmGlobalRoot, installedVersion } from "../update/auto-update.ts"
 import { cliCommand, compiledBinary, entryCommand, entrySpawnCommand, resolveWindowsShim, scriptEntry } from "../paths.ts"
 import { opencodeBrowserVersion } from "../version.ts"
 import { installBinaryRuntime } from "./binary.ts"
@@ -18,7 +18,6 @@ import {
   LEGACY_REGISTRY_ROOTS,
   legacyFiles,
   MCP_NAME,
-  PACKAGE,
   packageRoot,
   readFileOr,
   readJson,
@@ -202,11 +201,7 @@ export function removeLegacyHost() {
   return leftovers.length + keys.length > 0
 }
 
-/**
- * Installs this version where agents can keep running it: the executable in ~/.local/bin for a binary install, a global
- * npm package for an npm one, or the checkout's bundle from source. There is no private runtime or shim any more:
- * updates replace that same path, and the installer owns PATH and agent entries.
- */
+/** 使用本地编译产物或已安装的全局包配置客户端。 */
 export async function installRuntime(): Promise<{ entry: string; version: string; spawnEntry: string }> {
   if (compiledBinary()) {
     const runtime = await installBinaryRuntime()
@@ -224,22 +219,12 @@ export async function installRuntime(): Promise<{ entry: string; version: string
   const at = (...parts: string[]) => (globalRoot ? path.join(globalRoot, ...parts) : undefined)
   const globalPackage = at("@opencode", "browse")
   const alreadyGlobal = !!(globalPackage && path.resolve(packageRoot) === path.resolve(globalPackage))
-  if (!alreadyGlobal || spec) {
-    // npx's cache is evictable, so an npm install becomes a global one: agents then run a stable path, and updates are
-    // `npm install -g` (auto-update.ts). The channel matches this build.
-    const target = spec ?? `${PACKAGE}@${opencodeBrowserVersion.includes("-dev.") ? "dev" : "latest"}`
-    const installed = await runCommand("npm", ["install", "-g", target], { timeoutMs: 10 * 60_000 })
-    if (installed.status !== 0)
-      fail(`Could not install ${target} globally: ${(installed.stderr || installed.stdout).trim().split("\n").slice(-3).join(" ")}`)
-  }
-  const root = await npmGlobalRoot()
-  if (!root) fail("Could not find npm's global package folder (`npm root -g`); is npm on PATH?")
+  if (!alreadyGlobal || spec) fail("个人版不从公共 npm 安装或提升运行时，请从个人仓库运行 bun run setup。")
+  const root = globalRoot!
   const entry = path.join(root, "@opencode", "browse", "dist", "cli.mjs")
-  if (!existsSync(entry)) fail(`npm didn't install ${PACKAGE} in ${root}; run \`npm install -g ${PACKAGE}\` and try again.`)
+  if (!existsSync(entry)) fail("全局包缺少本地 CLI，请从个人仓库运行 bun run setup。")
   const version = readJson<{ version?: string }>(path.join(root, "@opencode", "browse", "package.json"))?.version ?? opencodeBrowserVersion
-  // Agents run `browse` from PATH, not an absolute node and package path: nvm/fnm change node between sessions, and the
-  // global npm bin folder is on PATH whenever npm is. npm keeps it current. Setup-time self-spawns use the bundle this
-  // install just wrote, since Windows can't start the PATH shim without a shell.
+  // 保留已安装的全局入口，避免 Node 版本切换后配置失效。
   return { entry: "browse", version, spawnEntry: entry }
 }
 

@@ -1,3 +1,0 @@
-source-path=SCRIPTDIR
-# jq filters and literal Markdown are single-quoted on purpose.
-disable=SC2016

@@ -1,5 +1,5 @@
 import { Effect } from "effect"
-import { autoUpdateModes, autoUpdateOverride, autoUpdateStatus, setStoredMode, storedMode, type AutoUpdateMode } from "../update/auto-update.ts"
+import { autoUpdateModes, autoUpdateStatus, setStoredMode, storedMode, type AutoUpdateMode } from "../update/auto-update.ts"
 import type { BrowserLink, BrowserLinks } from "./browser-links.ts"
 import type { ExtensionCommandInput } from "./rpc.ts"
 import { humanInputEnabled, humanInputOverride } from "../execute/human-input.ts"
@@ -34,9 +34,8 @@ export function createRelaySettingsSync(options: {
   /** The same, for the settings tool: by setting, with the variable that fixes it and the value in effect. */
   const userSettingOverrides = (): SettingOverrides => {
     const human = humanInputOverride()
-    const autoUpdate = autoUpdateOverride()
     return {
-      ...(autoUpdate ? { autoUpdate: { variable: process.env.OPENCODE_BROWSER_AUTO_UPDATE !== undefined ? "OPENCODE_BROWSER_AUTO_UPDATE" : "OPENCODE_BROWSER_UPDATE_CHECK", value: autoUpdate } } : {}),
+      autoUpdate: { variable: "个人源码策略", value: "off" },
       ...(agentWindow ? { window: { variable: "OPENCODE_BROWSER_AGENT_WINDOW", value: agentWindow } } : {}),
       ...(human === undefined ? {} : { humanInput: { variable: "OPENCODE_BROWSER_HUMAN_INPUT", value: human ? "on" : "off" } }),
     }

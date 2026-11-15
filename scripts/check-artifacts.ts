@@ -1,13 +1,5 @@
-// Checks the two release artifacts before anything is published, the same way locally (`bun run release:check`) and in
-// the release workflow:
-//   extension zip  no `update_url`, no relay-pairing.json, no source maps, no test-only hooks, the default relay port,
-//                  the release version, and exactly the capabilities in store/permissions.json; the store zip (stable)
-//                  has no manifest `key`, the dev zip (loaded unpacked) has the checkout's key and a build.json
-//   npm tarball    @opencode/browse at the release version: the launcher dist/cli.mjs and package metadata, an optional
-//                  dependency on each platform package, no install scripts; with --platform-tarball, it installs with
-//                  npm next to that platform package and starts its relay and MCP server
-//   bun scripts/check-artifacts.ts --version 0.1.0 --zip release/browse-extension-0.1.0.zip --tarball release/opencode-browse-0.1.0.tgz \
-//     [--platform-tarball opencode-browse-linux-x64-0.1.0.tgz]
+// 检查本地扩展 zip 与私有 npm 包的版本、权限、配对文件及测试钩子。
+// 显式传入 --platform-tarball 时还会安装本地产物并启动验证用 Relay/MCP。
 import { $ } from "bun"
 import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises"
 import net from "node:net"
@@ -176,12 +168,13 @@ export async function checkPackageTarball(tarball: string, version: string): Pro
       dependencies?: Record<string, string>
       optionalDependencies?: Record<string, string>
       publishConfig?: Record<string, unknown>
+      private?: boolean
     }
     if (pkg.name !== PACKAGE_NAME) problems.push(`${label}: package name ${String(pkg.name)} should be ${PACKAGE_NAME}`)
     if (pkg.version !== version) problems.push(`${label}: package version ${String(pkg.version)} should be ${version}`)
     if (pkg.scripts && Object.keys(pkg.scripts).length) problems.push(`${label}: has scripts; installs must not run code`)
     if (pkg.dependencies && Object.keys(pkg.dependencies).length) problems.push(`${label}: has dependencies; the launcher needs only Node`)
-    if (Object.keys(pkg.publishConfig ?? {}).some((key) => key !== "access")) problems.push(`${label}: sets publishConfig beyond access`)
+    if (pkg.private !== true || Object.keys(pkg.publishConfig ?? {}).length) problems.push(`${label}: requires private: true and no publishConfig`)
     for (const bin of ["browse", "opencode-browser", "opencode-browser-cli"]) if (pkg.bin?.[bin] !== "dist/cli.mjs") problems.push(`${label}: bin ${bin} should be dist/cli.mjs`)
     const { LAUNCHER_TARGETS } = await import("./npm-package.ts")
     const expected = Object.fromEntries(LAUNCHER_TARGETS.map((item) => [`@opencode/browse-${item.name}`, version]))
@@ -339,13 +332,14 @@ export async function checkBinaryTarball(tarball: string, version: string, targe
     bin?: unknown
     scripts?: Record<string, string>
     publishConfig?: Record<string, unknown>
+    private?: boolean
   }
   const want = { name: `@opencode/browse-${target}`, version, os: [os === "windows" ? "win32" : os], cpu: [arch], libc: os === "linux" ? [musl ? "musl" : "glibc"] : undefined }
   for (const key of ["name", "version", "os", "cpu", "libc"] as const)
     if (JSON.stringify(pkg[key]) !== JSON.stringify(want[key])) problems.push(`${label}: ${key} is ${JSON.stringify(pkg[key])}, expected ${JSON.stringify(want[key])}`)
   if (pkg.scripts && Object.keys(pkg.scripts).length) problems.push(`${label}: has scripts; installs must not run code`)
   if (pkg.bin !== undefined) problems.push(`${label}: has bin; the install script runs package/bin directly`)
-  if (Object.keys(pkg.publishConfig ?? {}).some((key) => key !== "access")) problems.push(`${label}: sets publishConfig beyond access`)
+  if (pkg.private !== true || Object.keys(pkg.publishConfig ?? {}).length) problems.push(`${label}: requires private: true and no publishConfig`)
   const head = Buffer.from(await $`tar -xzOf ${tarball} ${executable} | head -c 4`.quiet().nothrow().arrayBuffer())
   const magic = os === "windows" ? "4d5a" : os === "darwin" ? "cffaedfe" : "7f454c46"
   if (!head.toString("hex").startsWith(magic)) problems.push(`${label}: ${executable} isn't a ${os} executable`)

@@ -35,7 +35,7 @@ const target = (name: string, build = name): Target => {
   return { name, build, os: npmOs, cpu, ...(npmOs === "linux" ? { libc: name.endsWith("-musl") ? "musl" : "glibc" } : {}) }
 }
 
-/** Every target the install script picks from; keep in step with .github/release/publish-*.sh and the release workflow. */
+/** 本地打包支持的平台目标。 */
 export const TARGETS: readonly Target[] = [
   target("linux-x64"),
   target("linux-x64-baseline", "linux-x64"),
@@ -158,11 +158,11 @@ export async function packPlatforms(binaries: string, version: string, out: stri
         version,
         description: `The browse binary for ${item.name}.`,
         license: "MIT",
-        repository: { type: "git", url: "git+https://github.com/anomalyco/browse.git", directory: "rust" },
+        repository: { type: "git", url: "git+https://github.com/someone97421/ck-pi-desktop-browse.git", directory: "rust" },
         os: [item.os],
         cpu: [item.cpu],
         ...(item.libc ? { libc: [item.libc] } : {}),
-        publishConfig: { access: "public" },
+        private: true,
       }
       await Bun.write(path.join(directory, "package.json"), JSON.stringify(pkg, null, 2) + "\n")
       return npmPack(directory, out)

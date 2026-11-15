@@ -1,11 +1,8 @@
-// The Anomaly release service client (anomalyco/release docs/protocol.md): the manifest a binary install polls, the
-// client rules that decide whether its channel's current release is the build it runs, and the file URLs the installer
-// verifies. Versions are display text, never ordered: an install moves whenever the channel's current release is not
-// the build it runs. npm, pnpm and bun installs never read this; they follow the npm registry (auto-update.ts).
+// 本地发布协议解析与兼容接口。
 import crypto from "node:crypto"
 import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import path from "node:path"
-import { RELEASE_SERVICE, stateRoot } from "../paths.ts"
+import { stateRoot } from "../paths.ts"
 
 export type ReleaseChannel = "stable" | "beta" | "dev"
 
@@ -25,8 +22,7 @@ export function releaseChannel(channel: string): ReleaseChannel {
   return "stable"
 }
 
-export const releaseService = (env: NodeJS.ProcessEnv = process.env) =>
-  (env.OPENCODE_BROWSER_RELEASE_SERVICE?.trim() || RELEASE_SERVICE).replace(/\/+$/, "")
+export const releaseService = (_env: NodeJS.ProcessEnv = process.env) => ""
 
 // ---- the protocol's manifest and client rules -----------------------------------------------------
 
@@ -207,27 +203,14 @@ export type ManifestResponse =
   | { readonly status: "unchanged" }
   | { readonly status: "missing" }
 
-/** GET the CLI manifest for a channel, with the protocol's User-Agent and ETag revalidation. */
-export async function fetchManifest(options: {
+export async function fetchManifest(_options: {
   readonly channel: ReleaseChannel
   readonly version: string
   readonly etag?: string
   readonly service?: string
   readonly fetch?: typeof fetch
 }): Promise<ManifestResponse> {
-  const service = (options.service ?? releaseService()).replace(/\/+$/, "")
-  const response = await (options.fetch ?? fetch)(`${service}/browse/cli/${options.channel}.json`, {
-    headers: {
-      "user-agent": `browse/${options.channel}/${options.version}/cli`,
-      ...(options.etag ? { "if-none-match": options.etag } : {}),
-    },
-    signal: AbortSignal.timeout(30_000),
-  })
-  if (response.status === 304) return { status: "unchanged" }
-  if (response.status === 404) return { status: "missing" }
-  if (!response.ok) throw new Error(`the release service answered ${response.status} for browse/cli/${options.channel}`)
-  const etag = response.headers.get("etag")
-  return { status: "manifest", text: await response.text(), ...(etag ? { etag } : {}) }
+  return { status: "missing" }
 }
 
 export type ReleaseCheck =
@@ -235,8 +218,7 @@ export type ReleaseCheck =
   | { readonly status: "missing" }
   | { readonly status: "manifest"; readonly etag?: string; readonly releaseVersion: string; readonly decision: ReleaseDecision }
 
-/** One update check for a binary install: the manifest, then the protocol's decision for it. */
-export async function checkRelease(options: {
+export async function checkRelease(_options: {
   readonly version: string
   readonly channel: ReleaseChannel
   readonly target: string
@@ -245,33 +227,7 @@ export async function checkRelease(options: {
   readonly fetch?: typeof fetch
   readonly stateDir?: string
 }): Promise<ReleaseCheck> {
-  const manifest = await fetchManifest({
-    channel: options.channel,
-    version: options.version,
-    ...(options.etag ? { etag: options.etag } : {}),
-    ...(options.service ? { service: options.service } : {}),
-    ...(options.fetch ? { fetch: options.fetch } : {}),
-  })
-  if (manifest.status !== "manifest") return manifest
-  const decision = decide({
-    app: "browse",
-    artifact: "cli",
-    channel: options.channel,
-    manifest: manifest.text,
-    install: {
-      version: options.version,
-      target: options.target,
-      distribution: "direct",
-      rolloutBucket: rolloutBucket(options.stateDir),
-    },
-  })
-  let releaseVersion = options.version
-  try {
-    releaseVersion = parseManifest(JSON.parse(manifest.text))?.release.version ?? options.version
-  } catch {
-    // decide() already rejected it as malformed; the running version stands.
-  }
-  return { status: "manifest", releaseVersion, decision, ...(manifest.etag ? { etag: manifest.etag } : {}) }
+  return { status: "missing" }
 }
 
 /** This install's rollout bucket: drawn once, 0–99, kept locally and never sent. */

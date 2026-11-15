@@ -5,7 +5,7 @@
 // work again and whether the user had to do anything.
 //   node stress/installed.ts [--only a,b] [--user curl] [--extension ~/u/ext-0.0.8-store] [--sleep-minutes 3]
 //                            [--idle-minutes 20] [--agents 16] [--keep]
-// Needs: the user's install (stress/exe/installed-setup.sh), Xvfb on $DISPLAY, Chrome for Testing, sudo for iptables.
+// 需要事先准备的本地产物、Xvfb、Chrome for Testing 与网络故障注入环境。
 import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
@@ -477,41 +477,6 @@ const scenarios: Scenario[] = [
       } finally {
         await chromeR.stop()
         cli(ctx.u, ["set", "hostname", "127.0.0.1"], { timeoutMs: 60_000 })
-      }
-    },
-  },
-  {
-    // An npm install takes over one $HOME; then the user runs the curl installer in the same $HOME. The agent configs
-    // move to the binary, the relay restarts on it, the pairing stays, and an agent still running the old npm entry
-    // keeps working.
-    name: "npm-to-binary",
-    async run(ctx) {
-      const oldEntry = ctx.u.binary
-      if (!fs.existsSync(oldEntry)) throw new Error(`${oldEntry} missing: run installed-setup.sh npm for this user first`)
-      const oldAgent = mcp(ctx.u, {}, oldEntry)
-      await oldAgent.initialize()
-      const oldSession = `npm-${Date.now().toString(36)}`
-      const created = await oldAgent.call("session_new", { id: oldSession }, 60_000)
-      if (created.isError) throw new Error(`session_new over the npm entry: ${created.text.slice(0, 300)}`)
-      await exec(oldAgent, oldSession, `await page.goto(${JSON.stringify(ctx.fx.url("/form"))}); return 1`, 60_000)
-      const before = status(ctx.u, { binary: oldEntry })
-      const t = Date.now()
-      const install = spawnSync("bash", ["-c", "curl -fsSL https://opencode.ai/browse/install | bash -s -- --no-wait"], { encoding: "utf8", env: userEnv(ctx.u), cwd: ctx.u.home, timeout: 300_000 })
-      ctx.artifact("npm-to-binary-install.txt", install.stdout + install.stderr)
-      if (install.status !== 0) throw new Error(`curl installer exited ${install.status}: ${(install.stdout + install.stderr).slice(-400)}`)
-      const installMs = Date.now() - t
-      const settings = JSON.parse(fs.readFileSync(path.join(ctx.u.configDir, "settings.json"), "utf8")) as { entry: string; version: string }
-      const opencode = fs.readFileSync(path.join(ctx.u.home, ".config/opencode/opencode.json"), "utf8")
-      const after = status(ctx.u)
-      const connected = await waitFor(() => extensionConnected(ctx.u), { timeoutMs: 60_000, label: "extension connected after the migration" })
-      const oldStill = await recovery(() => exec(oldAgent, oldSession, "return await page.title()", 30_000), 60_000).catch((error) => ({ ms: -1, attempts: 0, lastError: oneLine(error) }))
-      const fresh = await recovery(async () => { const a = await freshAgent(ctx, "binary"); await a.client.call("session_delete", { id: a.session }); await a.client.close() })
-      await oldAgent.call("session_delete", { id: oldSession }).catch(() => undefined)
-      await oldAgent.close()
-      return {
-        recoverMs: connected.ms,
-        manual: "no",
-        note: `installer ${installMs} ms; entry ${settings.entry.endsWith("/browse") ? "binary" : settings.entry}; opencode.json ${opencode.includes(".local/bin/browse") ? "points at the binary" : "UNCHANGED"}; relay ${before.relay.buildId} -> ${after.relay.buildId} (${after.relay.running ? "running" : "down"}); old npm agent ${oldStill.ms >= 0 ? `still works (${oldStill.ms} ms)` : `broken: ${oldStill.lastError}`}; new binary agent ${fresh.ms} ms`,
       }
     },
   },

@@ -28,8 +28,8 @@ SETUP
   pair [--wait-seconds <s>]   Print a one-time pairing code and wait for the browser that redeems it
     --list                    Show paired browsers
     --revoke <browser>        Unpair a browser (its id, name or profile)
-  update [--check]            Update now, or only check
-    --mode <on|notify|off>    Automatic updates (OPENCODE_BROWSER_AUTO_UPDATE overrides)
+  update [--check]            更新已禁用；显示本地规则同步指引
+    --mode <on|notify|off>    仅保存历史设置，有效模式始终为 off
   status [--json]             Setup, relay and extension state
   version                     Print the version
 

@@ -1,8 +1,0 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<!-- The Rust browse needs no exceptions to the hardened runtime: no JIT (QuickJS interprets), no dyld variables, no
-     third-party libraries. -->
-<plist version="1.0">
-<dict>
-</dict>
-</plist>

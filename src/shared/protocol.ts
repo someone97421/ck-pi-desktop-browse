@@ -111,10 +111,8 @@ export type CliUpdateNotice = {
   command: string
 }
 
-/** The command that updates a CLI install: binary and checkout update in place, npm global and npx install the latest package. */
+/** 通过本地 CLI 显示个人版的手动同步说明。 */
 export function cliUpdateCommand(update: Pick<RelayAutoUpdate, "install" | "cli">): string {
-  if (update.install === "npm") return "npm install -g @opencode/browse@latest"
-  if (update.install === "npx") return "npx @opencode/browse@latest install"
   return `${update.cli?.trim() || "browse"} update`
 }
 

@@ -1,15 +1,7 @@
-// Builds and checks the release artifacts exactly as the release workflow does, without publishing anything:
-//   bun run release:check [--tag v0.1.0] [--require-changelog] [--versions-only]
-// 1. the version is one release version everywhere: cli/package.json, package.json, public/manifest.json, the Rust
-//    workspace (rust/Cargo.toml and every workspace crate in rust/Cargo.lock), and the tag
-// 2. the extension zip (scripts/package.ts): release/browse-extension-<version>.zip, the store build (stable) or the
-//    release service's unpacked build (dev); then release/opencode-browse-<version>.tgz, the npm launcher package
-//    (scripts/npm-package.ts)
-// 3. scripts/check-artifacts.ts on both, then release/SHA256SUMS. The npm install check needs a platform package, so
-//    the release workflow runs it once the binaries are built (--platform-tarball here runs it too).
+// 在本地构建并检查扩展 zip 与私有 npm 包，不发布任何产物。
+// bun run package:check [--tag v0.1.0] [--versions-only]
 import { $ } from "bun"
 import { createHash } from "node:crypto"
-import { existsSync } from "node:fs"
 import { readFile, rm, writeFile } from "node:fs/promises"
 import path from "node:path"
 import { parseArgs } from "node:util"
@@ -21,8 +13,8 @@ const root = path.resolve(import.meta.dir, "..")
 const release = path.join(root, "release")
 const json = async (file: string) => JSON.parse(await readFile(path.join(root, file), "utf8")) as Record<string, unknown>
 
-/** Everything that must agree before a release: the versions, the tag, and the changelog entry. */
-export async function versionProblems(options: { tag?: string; requireChangelog?: boolean } = {}) {
+/** 本地打包时检查版本一致性。 */
+export async function versionProblems(options: { tag?: string } = {}) {
   const cli = (await json("cli/package.json")).version as string
   const problems: string[] = []
   try {
@@ -41,7 +33,6 @@ export async function versionProblems(options: { tag?: string; requireChangelog?
   for (const member of cargoLockMemberVersions(await readFile(path.join(root, "rust", "Cargo.lock"), "utf8")))
     if (member.version !== cli) problems.push(`rust/Cargo.lock has ${member.name} ${member.version}, not ${cli} (crates take version.workspace = true; bun scripts/version.ts set ${cli})`)
   if (options.tag !== undefined && options.tag !== `v${cli}`) problems.push(`tag ${options.tag} doesn't match cli/package.json version ${cli} (expected v${cli})`)
-  if (options.requireChangelog && !existsSync(path.join(root, "changelog", `${cli}.md`))) problems.push(`changelog/${cli}.md is missing`)
   return { version: cli, problems }
 }
 
@@ -50,12 +41,12 @@ async function sha256(file: string) {
 }
 
 if (import.meta.main) {
-  const { values } = parseArgs({ options: { tag: { type: "string" }, "require-changelog": { type: "boolean" }, "versions-only": { type: "boolean" }, "platform-tarball": { type: "string" } } })
+  const { values } = parseArgs({ options: { tag: { type: "string" }, "versions-only": { type: "boolean" }, "platform-tarball": { type: "string" } } })
   const fail = (problems: string[]) => {
     for (const problem of problems) console.error(`✗ ${problem}`)
     process.exit(1)
   }
-  const { version, problems } = await versionProblems({ ...(values.tag ? { tag: values.tag } : {}), requireChangelog: values["require-changelog"] ?? false })
+  const { version, problems } = await versionProblems(values.tag ? { tag: values.tag } : {})
   if (problems.length) fail(problems)
   console.log(`✓ version ${version} agrees across cli/package.json, package.json, public/manifest.json and the Rust workspace${values.tag ? ` and ${values.tag}` : ""}`)
   if (values["versions-only"]) process.exit(0)

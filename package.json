@@ -13,8 +13,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "bun test ./test && cd cli && bun test",
     "package": "bun scripts/package.ts",
-    "release": "bun scripts/release.ts",
-    "release:check": "bun scripts/release-check.ts"
+    "package:check": "bun scripts/release-check.ts"
   },
   "devDependencies": {
     "@tsconfig/node22": "22.0.2",

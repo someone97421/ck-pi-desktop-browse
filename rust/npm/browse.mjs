@@ -42,7 +42,7 @@ const file = binary()
 if (!file) {
   console.error(
     `browse: no browse binary for ${process.platform}-${process.arch} is installed. Reinstall without --omit=optional ` +
-      "or --no-optional, or install the binary instead: curl -fsSL https://opencode.ai/browse/install | bash",
+      "or --no-optional; build from personal source: https://github.com/someone97421/ck-pi-desktop-browse",
   )
   process.exit(1)
 }

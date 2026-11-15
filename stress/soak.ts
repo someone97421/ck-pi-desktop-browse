@@ -262,7 +262,7 @@ const chaosActions: Record<string, () => Promise<Record<string, unknown>>> = {
       return { tabId: victim.tabId }
     }
     const hooked = await c.evalInExtension<boolean>(`typeof globalThis.__opencodeBrowserTest?.toolbarClick === "function"`)
-    if (!hooked) throw new Error("the extension has no test hooks; build it with OPENCODE_BROWSER_TEST_HOOKS=1 (stress/exe/deploy.sh does)")
+    if (!hooked) throw new Error("the extension has no test hooks; build it with OPENCODE_BROWSER_TEST_HOOKS=1")
     await c.evalInExtension(`globalThis.__opencodeBrowserTest.toolbarClick(${Number(victim.tabId)})`)
     return { tabId: victim.tabId, session: victim.opencodeBrowserSessionId }
   },

@@ -211,11 +211,7 @@ export function cliInstall(): CliInstall {
   return { kind: "npm", version: globalThis.__OPENCODE_BROWSER_VERSION__, npx: /[/\\]_npx[/\\]/.test(process.argv[1] ?? "") }
 }
 
-/**
- * The command that runs browse in a terminal: `browse` for a binary or global npm install on PATH (install adds the
- * binary's folder), the executable's full path when it isn't on PATH, `npx @opencode/browse` (`@dev` on the dev
- * channel) for an npx run, and this checkout's bundle from a checkout, where the package may not be published.
- */
+/** 安装后的本地 CLI 命令；npx 副本使用当前入口。 */
 export function cliPrefix(install: CliInstall = cliInstall()): string {
   if (install.kind === "binary") {
     const dir = path.dirname(install.binary)
@@ -223,7 +219,7 @@ export function cliPrefix(install: CliInstall = cliInstall()): string {
     return onPath ? "browse" : quoted(install.binary)
   }
   if (install.kind === "checkout") return `node ${quoted(install.bundle)}`
-  if (install.npx) return install.version?.includes("-dev.") ? "npx @opencode/browse@dev" : "npx @opencode/browse"
+  if (install.npx) return entryCommand(runningEntry()).map(quoted).join(" ")
   return "browse"
 }
 
@@ -231,8 +227,7 @@ export function cliPrefix(install: CliInstall = cliInstall()): string {
 export const cliCommand = (args: string, install: CliInstall = cliInstall()): string => `${cliPrefix(install)} ${args}`
 
 declare global {
-  // Injected by build.ts: the store item from the release workflow's repository variables (RELEASING.md), and for a
-  // dev build the unpacked extension zip it was built with, published to the release service.
+  // 构建注入的商店配置和本地开发扩展元数据。
   var __OPENCODE_BROWSER_STORE__: { readonly id?: string } | undefined
   var __OPENCODE_BROWSER_EXTENSION__: DevExtension | undefined
 }
@@ -241,7 +236,7 @@ declare global {
 const STORE_ITEM_ID = /^[a-p]{32}$/
 
 /**
- * browse's public Chrome Web Store item (the CWS_ITEM_ID repository variable, RELEASING.md). A checkout, or a package
+ * 可选的 Chrome Web Store 标识。A checkout, or a package
  * built without one, still points users at this item: every channel installs browse from the store.
  */
 export const PUBLIC_STORE_ID = "mfnicocicmmlkpjnaffgihfjhdgjkdjg"
@@ -255,30 +250,28 @@ export type StoreConfig = {
  * The Chrome Web Store item this install knows. The published package carries the ID the release workflow baked in
  * (OPENCODE_BROWSER_STORE_ID at build time); the same variable at run time overrides it (testing a store build from a
  * checkout). Nothing else is trusted as a store ID: install sends the pairing code to the extension with this ID.
- * A stable npm install gets the extension from this item, a dev install from the release service (devExtension), and a
- * checkout loads dist/ unpacked.
+ * 源码 checkout 加载本地 dist/，开发构建使用本地维护的扩展。
  */
 export function storeConfig(env: NodeJS.ProcessEnv = process.env, baked = globalThis.__OPENCODE_BROWSER_STORE__): StoreConfig {
   const id = [env.OPENCODE_BROWSER_STORE_ID, baked?.id].find((value) => value && STORE_ITEM_ID.test(value))
   return id ? { id } : {}
 }
 
-/** The unpacked extension zip a dev build was built with: content-addressed on the release service, so exactly these bytes. */
+/** 开发构建携带的扩展元数据。 */
 export type DevExtension = { readonly file: string; readonly sha256: string; readonly size: number }
 
-/** Anomaly's release service (github.com/anomalyco/release), where every push to dev publishes the dev extension. */
-export const RELEASE_SERVICE = "https://anoma.ly/release"
+export const RELEASE_SERVICE = ""
 
 /** The dev extension this package was built with; undefined for stable releases and checkouts. */
 export function devExtension(baked = globalThis.__OPENCODE_BROWSER_EXTENSION__): DevExtension | undefined {
   return baked && /^[0-9a-f]{64}$/.test(baked.sha256) && /^[\w.-]+\.zip$/.test(baked.file) ? baked : undefined
 }
 
-/** Where the release service serves a file; OPENCODE_BROWSER_RELEASE_SERVICE points it elsewhere (tests; the sha256 is still checked). */
-export const devExtensionUrl = (extension: DevExtension, env: NodeJS.ProcessEnv = process.env) =>
-  `${(env.OPENCODE_BROWSER_RELEASE_SERVICE || RELEASE_SERVICE).replace(/\/+$/, "")}/browse/files/${extension.sha256}/${extension.file}`
+export const devExtensionUrl = (_extension: DevExtension, _env: NodeJS.ProcessEnv = process.env): string => {
+  throw new Error("此个人 fork 已禁用开发扩展远程下载（disabled）；请按本地规则同步工作流维护本地扩展。")
+}
 
-/** The folder a dev install's unpacked extension lives in (loaded once with Load unpacked; updates replace its files). */
+/** 本地开发扩展的目录。 */
 export const devExtensionFolder = (root = cacheRoot()) => path.join(root, "extension")
 
 /** The store page of an item. */

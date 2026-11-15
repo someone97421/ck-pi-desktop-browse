@@ -18,8 +18,16 @@ describe("the command people type to run browse", () => {
     expect(cliCommand("pair", { kind: "npm", version: "0.0.8" })).toBe("browse pair")
   })
 
-  test("an npx install keeps the npx command", () => {
-    expect(cliCommand("pair", { kind: "npm", version: "0.0.8", npx: true })).toBe("npx @opencode/browse pair")
-    expect(cliCommand("pair", { kind: "npm", version: "0.0.9-dev.12", npx: true })).toBe("npx @opencode/browse@dev pair")
+  test("npx 安装使用当前本地入口，不调用公共包", () => {
+    const entry = process.argv[1]
+    try {
+      process.argv[1] = "/local/fork/cli.mjs"
+      const node = /^[\w@%+=:,./-]+$/.test(process.execPath) ? process.execPath : JSON.stringify(process.execPath)
+      expect(cliCommand("pair", { kind: "npm", version: "0.0.8", npx: true })).toBe(`${node} /local/fork/cli.mjs pair`)
+      expect(cliCommand("pair", { kind: "npm", version: "0.0.9-dev.12", npx: true })).toBe(`${node} /local/fork/cli.mjs pair`)
+    } finally {
+      if (entry === undefined) delete process.argv[1]
+      else process.argv[1] = entry
+    }
   })
 })

@@ -43,7 +43,7 @@ describe("cliUpdateNotice", () => {
   test("mentions updates that are notify-only or off", () => {
     expect(cliUpdateNotice({ ...base, install: "npm", mode: "notify", effective: "notify" }, NOW)).toMatchObject({
       reason: "mode",
-      command: "npm install -g @opencode/browse@latest",
+      command: "browse update",
     })
     expect(cliUpdateNotice({ ...base, install: "npm", mode: "off", effective: "off" }, NOW)).toMatchObject({ reason: "mode" })
     // An environment override can turn off what the stored mode says.
@@ -53,7 +53,7 @@ describe("cliUpdateNotice", () => {
   test("mentions installs that can't update themselves", () => {
     expect(cliUpdateNotice({ ...base, install: "npx", effective: "off" }, NOW)).toMatchObject({
       reason: "install",
-      command: "npx @opencode/browse@latest install",
+      command: "browse update",
     })
     expect(cliUpdateNotice({ ...base, install: "other", effective: "off" }, NOW)).toMatchObject({ reason: "install", command: "browse update" })
     expect(cliUpdateNotice({ ...base, install: "other", cli: "node /src/cli.mjs", effective: "off" }, NOW)).toMatchObject({

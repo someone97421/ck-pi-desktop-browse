@@ -204,7 +204,7 @@ export async function extension() {
   if (!folder) {
     if (!STORE_URL)
       fail(
-        "This package doesn't know its Chrome Web Store item. Install a released version (`npx @opencode/browse install`), or set up browse from a checkout.",
+        "请从个人仓库源码构建并加载本地扩展：https://github.com/someone97421/ck-pi-desktop-browse",
       )
     log(`Install browse from the Chrome Web Store: ${STORE_URL}`)
     log(`Then run \`${cliCommand("install")}\` again to pair it.`)

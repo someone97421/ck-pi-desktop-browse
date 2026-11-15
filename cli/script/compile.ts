@@ -1,12 +1,5 @@
-// Compiles the CLI (src/main.ts, the entry dist/cli.mjs bundles) into standalone executables with `bun build --compile`,
-// every npm dependency bundled, one per platform the way opencode ships @opencode/cli-<target>:
-//   bun script/compile.ts [target...]    e.g. linux-x64 darwin-arm64 windows-x64; no target: every target
-// Output: dist-bin/browse-<target>/bin/browse (browse.exe on Windows) and its package.json (@opencode/browse-<target>,
-// with os/cpu/libc), which script/pack.ts packs for npm. Like build.ts, OPENCODE_BROWSER_STORE_ID bakes in the store
-// item and OPENCODE_BROWSER_EXTENSION_ZIP a dev build's extension zip. Each executable also carries the install script
-// this release ships with (../install, or ../install.ps1 on Windows), which a binary install's updater reruns in place of
-// downloading the one served at update time. BUN_COMPILE_RELEASE (e.g. bun-v1.4.4) takes each target's Bun runtime from
-// that GitHub release, checked against its SHASUMS256.txt, instead of letting Bun fetch it.
+// 使用 bun build --compile 生成供本地使用的独立 CLI，按平台输出至 dist-bin/。
+// BUN_COMPILE_RELEASE 可固定 Bun 运行时版本，并通过校验和验证下载。
 import { $ } from "bun"
 import { createHash } from "node:crypto"
 import { mkdir, readFile, rm } from "node:fs/promises"
@@ -49,10 +42,6 @@ if (import.meta.main) {
 
   const storeId = process.env.OPENCODE_BROWSER_STORE_ID?.trim()
   if (storeId && !/^[a-p]{32}$/.test(storeId)) throw new Error(`OPENCODE_BROWSER_STORE_ID is not a Chrome Web Store item ID: ${JSON.stringify(storeId)}`)
-  const zip = process.env.OPENCODE_BROWSER_EXTENSION_ZIP?.trim()
-  const extension = zip
-    ? await readFile(zip).then((bytes) => ({ file: path.basename(zip), sha256: createHash("sha256").update(bytes).digest("hex"), size: bytes.length }))
-    : undefined
   const build = new Date().toISOString()
 
   await rm(outdir, { recursive: true, force: true })
@@ -61,7 +50,6 @@ if (import.meta.main) {
     const name = `browse-${target}`
     const binary = path.join(outdir, name, "bin", item.os === "win32" ? "browse.exe" : "browse")
     const executablePath = await bunRuntime(item)
-    const installer = await readFile(path.join(here, "..", item.os === "win32" ? "install.ps1" : "install"), "utf8")
     const result = await Bun.build({
       entrypoints: [path.join(here, "src/main.ts")],
       tsconfig: path.join(here, "tsconfig.json"),
@@ -100,10 +88,9 @@ if (import.meta.main) {
         "globalThis.__OPENCODE_BROWSER_VERSION__": JSON.stringify(version),
         "globalThis.__OPENCODE_BROWSER_BUILD_ID__": JSON.stringify(build),
         "globalThis.__OPENCODE_BROWSER_STORE__": JSON.stringify(storeId ? { id: storeId } : {}),
-        "globalThis.__OPENCODE_BROWSER_EXTENSION__": extension ? JSON.stringify(extension) : "undefined",
+        "globalThis.__OPENCODE_BROWSER_EXTENSION__": "undefined",
         "globalThis.__OPENCODE_BROWSER_COMPILED__": "true",
         "globalThis.__OPENCODE_BROWSER_TARGET__": JSON.stringify(target),
-        "globalThis.__OPENCODE_BROWSER_INSTALLER__": JSON.stringify(installer),
       },
     })
     if (!result.success) throw new AggregateError(result.logs, `compile failed for ${target}`)
@@ -121,7 +108,7 @@ if (import.meta.main) {
           os: [item.os],
           cpu: [item.arch],
           ...(item.os === "linux" ? { libc: [item.abi ?? "glibc"] } : {}),
-          publishConfig: { access: "public" },
+          private: true,
         },
         null,
         2,
