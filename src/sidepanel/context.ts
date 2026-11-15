@@ -10,3 +10,8 @@ export function pairingAddress(endpoint: string, port: number): string {
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error("Relay 返回了无效端口")
   return `${new URL(endpoint).hostname}:${port}`
 }
+
+export type RemoteStatus = { authenticated: boolean; online: boolean; canCompose: boolean }
+export function validFrameMessage(event: Pick<MessageEvent, "source" | "origin" | "data">, source: Window | null, origin: string): boolean {
+  return source !== null && event.source === source && event.origin === origin && event.data !== null && typeof event.data === "object"
+}

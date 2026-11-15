@@ -9,7 +9,13 @@ export function normalizeServerOrigin(input: string): string {
   return url.origin
 }
 export function apiOrigin(): string { return serverOrigin }
-export function websocketUrl(): string { return `${serverOrigin.replace(/^http/, "ws")}/ws` }
+export function frameUrl(server: string, parentOrigin: string): string {
+  if (!/^chrome-extension:\/\/[a-p]{32}$/.test(parentOrigin)) throw new Error("无效的扩展来源")
+  const url = new URL("/", normalizeServerOrigin(server))
+  url.searchParams.set("webRemote", "true")
+  url.searchParams.set("parentOrigin", parentOrigin)
+  return url.href
+}
 export async function loadServerOrigin(): Promise<string> {
   const stored = await chrome.storage.local.get(SERVER_ORIGIN_KEY)
   const value = stored[SERVER_ORIGIN_KEY]

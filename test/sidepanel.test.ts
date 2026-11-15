@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
-import { browserContext, needsPairing, pairingAddress } from "../src/sidepanel/context"
-import { DEFAULT_SERVER_ORIGIN, normalizeServerOrigin } from "../src/sidepanel/config"
+import { browserContext, needsPairing, pairingAddress, validFrameMessage } from "../src/sidepanel/context"
+import { DEFAULT_SERVER_ORIGIN, frameUrl, normalizeServerOrigin } from "../src/sidepanel/config"
 
 describe("侧边栏连接上下文", () => {
   test("缺省连接唯一的局域网远控服务 7878", () => {
@@ -24,5 +24,24 @@ describe("侧边栏连接上下文", () => {
     expect(normalizeServerOrigin(" http://localhost:7878/ ")).toBe("http://localhost:7878")
     for (const origin of ["file:///tmp/x", "http://user:pass@localhost:7878", "http://localhost:7878/api", "http://localhost:7878/?key=x"])
       expect(() => normalizeServerOrigin(origin)).toThrow()
+  })
+  test("iframe 只传递来源和 Web 模式，不携带认证信息", () => {
+    const parent = `chrome-extension://${"a".repeat(32)}`
+    const url = new URL(frameUrl("http://localhost:7878", parent))
+    expect(url.origin).toBe("http://localhost:7878")
+    expect(url.pathname).toBe("/")
+    expect([...url.searchParams]).toEqual([["webRemote", "true"], ["parentOrigin", parent]])
+    for (const origin of ["*", "null", "https://example.test", `${parent}/`, `chrome-extension://${"z".repeat(32)}`]) {
+      expect(() => frameUrl(DEFAULT_SERVER_ORIGIN, origin)).toThrow()
+    }
+  })
+  test("iframe 回执必须同时匹配来源窗口及精确 origin", () => {
+    const source = {} as Window, other = {} as Window
+    const event = { source, origin: DEFAULT_SERVER_ORIGIN, data: { type: "pi-desktop:remote-status" } }
+    expect(validFrameMessage(event, source, DEFAULT_SERVER_ORIGIN)).toBe(true)
+    expect(validFrameMessage(event, other, DEFAULT_SERVER_ORIGIN)).toBe(false)
+    expect(validFrameMessage(event, source, "http://localhost:7878")).toBe(false)
+    expect(validFrameMessage({ ...event, data: null }, source, DEFAULT_SERVER_ORIGIN)).toBe(false)
+    expect(validFrameMessage({ ...event, source: null }, null, DEFAULT_SERVER_ORIGIN)).toBe(false)
   })
 })

@@ -32,6 +32,7 @@ import {
   type RelayOverrides,
 } from "../shared/protocol"
 import { unpackedExtensionId } from "../../cli/src/protocol"
+import { DEFAULT_SERVER_ORIGIN, SERVER_ORIGIN_KEY, normalizeServerOrigin } from "../sidepanel/config"
 import { cliUpdateText, describeStatus } from "./describe"
 import { RelayForm } from "./relay-form"
 import { applyColorScheme, Brand, CopyBox, createRelay, createStored, Note, Rich } from "./ui"
@@ -49,7 +50,21 @@ function Settings() {
   const [human, setHuman] = createStored(HUMAN_INPUT_KEY, humanInput)
   const [notifications, setNotifications] = createStored(HANDOFF_NOTIFICATIONS_KEY, handoffNotifications)
   const [storedName] = createStored(BROWSER_NAME_KEY, (value) => (typeof value === "string" ? value : ""))
+  const [storedHarnessOrigin] = createStored(SERVER_ORIGIN_KEY, (value) => (typeof value === "string" ? value : DEFAULT_SERVER_ORIGIN))
 
+  const [harnessOrigin, setHarnessOrigin] = createSignal<string>()
+  const saveHarnessOrigin = (event: SubmitEvent) => {
+    event.preventDefault()
+    try {
+      const origin = normalizeServerOrigin(harnessOrigin() ?? storedHarnessOrigin())
+      void chrome.storage.local.set({ [SERVER_ORIGIN_KEY]: origin }).then(() => {
+        setHarnessOrigin(origin)
+        showToast({ title: "Harness address saved", description: "The Browse sidepanel will use it next time it opens.", variant: "success" })
+      })
+    } catch (error) {
+      showToast({ title: "Invalid Harness address", description: error instanceof Error ? error.message : String(error), variant: "error" })
+    }
+  }
   const [name, setName] = createSignal<string>()
   const saveName = (event: SubmitEvent) => {
     event.preventDefault()
@@ -152,6 +167,21 @@ function Settings() {
               <Button type="submit" variant="neutral">
                 Save
               </Button>
+            </form>
+          </Row>
+        </Section>
+        <Section title="Harness">
+          <Row label="Harness address" description="The desktop Harness used by the Browse sidepanel and its embedded Renderer.">
+            <form class="name-form" onSubmit={saveHarnessOrigin}>
+              <TextInput
+                value={harnessOrigin() ?? storedHarnessOrigin()}
+                onInput={(event) => setHarnessOrigin(event.currentTarget.value)}
+                placeholder={DEFAULT_SERVER_ORIGIN}
+                aria-label="Harness address"
+                autocomplete="off"
+                spellcheck={false}
+              />
+              <Button type="submit" variant="neutral">Save</Button>
             </form>
           </Row>
         </Section>

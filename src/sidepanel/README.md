@@ -1,14 +1,21 @@
-# 侧边栏对话前端
+# 侧边栏与原版 Renderer
 
-`chat/` 迁自个人 fork `someone97421/CK-PI-Desktop` 的 `plugins/lan-remote-control/web/`，来源提交为 `092c3158425e664ac10d6a46286d8145a63af784`。保留完整的会话、附件、审批、模型、阶段模式与子代理交互；扩展单独维护副本。
+侧栏只加载 Harness 提供的桌面 Renderer iframe；不再在聊天面板上常驻 Browse 连接栏。Browse 状态、当前标签页操作入口由原版 Renderer 的 Composer 工具栏呈现，扩展后台继续维护 Relay 连接、自动 ensure、自动配对、当前 tab 状态以及父子消息转发。
 
-侧边栏适配集中在 `config.ts`、`context.ts`、`index.ts` 和 `style.css`。`chat/transport.js` 统一读取服务地址；设备令牌按地址隔离；`chat/app.js` 仅向顶部连接栏开放登录状态、Browse RPC 和输入框上下文插入入口。`chat/message-stream.js` 保留来源共享层的增量合并语义。
+默认 Harness 地址为 `http://127.0.0.1:7878`，在独立的 `settings.html` 设置页中修改。地址保存到 `chrome.storage.local` 的 `chromeSidebarServerOrigin`，与 `src/sidepanel/config.ts` 共用；Relay 地址、配对码和浏览器配置继续在设置页的 Advanced 区域维护。
 
-来源仓库许可证原文保存在 `public/licenses/CK-PI-Desktop-LGPL-3.0.txt`，扩展构建时复制至 `dist/licenses/`。Browse 自身及其其他依赖继续保留原有许可证。
+iframe 地址为 `/?webRemote=true&parentOrigin=chrome-extension://<扩展ID>`。主机密码、设备 token、IPC 与附件请求全部在 iframe 内处理。扩展只收到认证/在线状态和已请求操作的结果，不接收 Bearer。双方都验证 `event.source` 和精确 `event.origin`。
 
-默认 Harness 为 `http://127.0.0.1:7878`，连接唯一的 `local.lan-remote-control` 插件，与手机端共用主机密码和设备管理。侧栏设置可修改地址，以及将图标点击行为切换为直接借出/收回标签页。私网地址可用于远控聊天；Browse Relay 仍沿用自身的本机监听边界，自动配对使用 CLI 返回的 endpoint，不将其改写为私网地址。
+消息格式：
 
-显式保存的服务地址继续保留；若曾保存旧服务端口，可在侧栏设置中改回 `7878`，并使用现有局域网远控密码登录。默认地址和无效配置的回退地址均为 `7878`。
+- 父 → 子：`{type:"pi-desktop:status-request"}` 查询 Harness 状态。
+- 子 → 父：`{type:"pi-desktop:remote-status",authenticated,online,canCompose}`。
+- 父 → 子：`{type:"pi-desktop:browse-status",authenticated,online,busy,borrowed,browserContext}` 推送当前 tab 操作状态。
+- 子 → 父：`{type:"pi-desktop:browse-request",requestId,method}`，method 为 `toggleAttach`、`insertCurrent` 或 `handoff`。
+- 父 → 子：`{type:"pi-desktop:browse-response",requestId,ok,result}` 或 `{type:"pi-desktop:browse-response",requestId,ok:false,error}`。`insertCurrent` 的 result 带 `browserContext`，由 Renderer 写入原版 Composer。
+- 父子之间仍使用既有 `pi-desktop:request/response` 处理 Harness 内部 RPC，例如 ensure Relay、生成配对码和插入 Composer 草稿。
+
+Browse 操作收到请求后会先自动 ensure 或配对 Relay，再执行后台 tab/handoff 操作。借出/收回当前页与 `@当前页` 位于原版 Composer 工具栏，Relay 未配对时会返回连接错误而不是静默无响应。
 
 验证命令：
 
@@ -16,5 +23,6 @@
 bun run typecheck
 bun run build
 bun test ./test/sidepanel.test.ts
-bun test ./test/isolated/sidepanel-background.ts
 ```
+
+扩展构建本身不生成主程序 Renderer，也不代表已完成手机或 Chrome 实机验证。
