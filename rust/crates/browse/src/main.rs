@@ -26,6 +26,7 @@ SETUP
     --no-modify-path          Don't add browse to PATH
   extension                   Where to get the extension
   pair [--wait-seconds <s>]   Print a one-time pairing code and wait for the browser that redeems it
+    --mint-json               Ensure relay is running, print {code,port,endpoint} JSON and exit without waiting
     --list                    Show paired browsers
     --revoke <browser>        Unpair a browser (its id, name or profile)
   update [--check]            更新已禁用；显示本地规则同步指引

@@ -31,6 +31,7 @@ export default defineConfig(({ mode }) => ({
         welcome: fileURLToPath(new URL("./welcome.html", import.meta.url)),
         onboarding: fileURLToPath(new URL("./onboarding.html", import.meta.url)),
         settings: fileURLToPath(new URL("./settings.html", import.meta.url)),
+        sidepanel: fileURLToPath(new URL("./sidepanel.html", import.meta.url)),
         background: fileURLToPath(new URL("./src/background/index.ts", import.meta.url)),
       },
       output: {

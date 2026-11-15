@@ -676,6 +676,13 @@ export function createAgentRelay(input: { changed: (state: AgentRelayState) => v
       attempts = 0
       void connect("attach")
     },
+    completeHandoff(tabId: number, handoffId: string) {
+      const page = pageStatuses.get(tabId)
+      if (page?.state !== "waiting" || page.handoffId !== handoffId) throw new Error("此人工接管已结束，请刷新当前页状态")
+      if (!open() || status !== "connected") throw new Error("Browse Relay 未连接")
+      log.add("handoff.completed", { tabId, from: "sidepanel" })
+      send({ method: "handoff.completed", params: { tabId, handoffId } })
+    },
     /**
      * Content-script messages. Returns undefined when the message isn't for the relay link, true when
      * the answer comes later through sendResponse (keep the channel open), and false when it was handled.

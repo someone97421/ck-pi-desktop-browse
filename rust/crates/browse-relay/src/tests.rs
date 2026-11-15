@@ -392,9 +392,9 @@ async fn serves_the_tool_api_behind_the_token() {
     assert_eq!(text(&tabs), json!({ "tabs": [] }));
 }
 
-/// The relay picks a client's tools and instructions by the name the MCP proxy forwards.
+/// The MCP proxy forwards the client name; every client defaults to the complete registry.
 #[tokio::test]
-async fn the_client_name_decides_tools_and_instructions() {
+async fn every_client_gets_all_tools_and_combined_instructions() {
     if std::env::var_os("OPENCODE_BROWSER_TOOLS").is_some() {
         return;
     }
@@ -409,13 +409,14 @@ async fn the_client_name_decides_tools_and_instructions() {
         }
     };
     let names = |tools: Value| tools.as_array().unwrap().iter().map(|t| t["name"].as_str().unwrap().to_string()).collect::<Vec<_>>();
-    // This registry has no execute tool; the execute surface keeps status and tabs.
-    assert_eq!(names(get("/tools", "claude-code").await), ["status", "tabs"]);
-    assert!(names(get("/tools", "opencode").await).contains(&"handoff".to_string()));
-    let plain = get("/instructions", "opencode").await;
-    assert!(plain["instructions"].as_str().unwrap().contains("Tabs are the handle"), "{plain}");
-    let scripted = get("/instructions", "cursor").await;
-    assert!(scripted["instructions"].as_str().unwrap().contains("execute"), "{scripted}");
+    for client in ["this-is-a-agent", "pi-desktop", "opencode", "claude-code", "cursor", ""] {
+        assert_eq!(names(get("/tools", client).await), ["status", "tabs", "handoff", "demonstrate", "settings"]);
+        let result = get("/instructions", client).await;
+        let instructions = result["instructions"].as_str().unwrap();
+        assert!(instructions.contains("Tabs are the handle"));
+        assert!(instructions.contains("individual tools for ordinary single-step"));
+        assert!(instructions.contains("`execute` for complex loops"));
+    }
 }
 
 #[tokio::test]

@@ -12,7 +12,7 @@
     "128": "icons/icon-128.png"
   },
   "action": {
-    "default_title": "browse · Click to let agents use this tab",
+    "default_title": "browse · 打开侧边栏对话与浏览器调试",
     "default_icon": {
       "16": "icons/icon-16.png",
       "32": "icons/icon-32.png"
@@ -21,6 +21,9 @@
   "options_ui": {
     "page": "settings.html",
     "open_in_tab": true
+  },
+  "side_panel": {
+    "default_path": "sidepanel.html"
   },
   "background": {
     "service_worker": "background.js",
@@ -34,7 +37,8 @@
     "alarms",
     "webNavigation",
     "scripting",
-    "notifications"
+    "notifications",
+    "sidePanel"
   ],
   "host_permissions": [
     "<all_urls>"

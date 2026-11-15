@@ -351,6 +351,20 @@ fn ago(ms: u64) -> String {
 
 pub fn pair(args: &[String]) -> anyhow::Result<i32> {
     let paths = relay_api::paths();
+    if args.iter().any(|arg| arg == "--mint-json") {
+        if args.len() != 1 {
+            bail!("--mint-json must be used alone: browse pair --mint-json");
+        }
+        relay::ensure()?;
+        let code = mint_code(&format!("{:016x}", session::random_u64()))?;
+        let port = relay_api::port();
+        println!("{}", json!({
+            "code": pairing::format_pairing_code(&code),
+            "port": port,
+            "endpoint": format!("http://127.0.0.1:{port}"),
+        }));
+        return Ok(0);
+    }
     match args.first().map(String::as_str) {
         Some("--list") => {
             let list = pairing::read_browser_pairings(&paths);

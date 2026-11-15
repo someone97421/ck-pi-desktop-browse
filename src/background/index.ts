@@ -1,37 +1,42 @@
-// Service worker: keeps the link to the local browse relay (agent-relay.ts), which drives tabs for agents. The
-// toolbar button lets agents use the current tab, or stops them (before setup, it opens the onboarding page). The
-// onboarding page (onboarding.html) walks through setup; the settings page (settings.html, the options page) shows the
-// connection.
-import { AGENT_DIAGNOSTICS, STATUS_PORT, type FromStatusPage, type ToStatusPage } from "../shared/protocol"
+// 扩展页面共用 Relay 状态端口，侧边栏额外订阅所属窗口的当前标签页。
+import { AGENT_DIAGNOSTICS, STATUS_PORT, TOOLBAR_MODE_KEY, type ActiveTabInfo, type FromStatusPage, type ToStatusPage } from "../shared/protocol"
 import { createAgentRelay } from "./agent-relay"
 import { TabCleanup } from "./tab-cleanup"
 
-// Neutral by default; amber while an agent runs, blue while it waits for the user.
 const BADGE_COLORS: Record<string, string> = { default: "#3b3b3b", RUN: "#b45309", WAIT: "#2563eb" }
 const pages = new Set<chrome.runtime.Port>()
+const windows = new Map<chrome.runtime.Port, number>()
+const tabOperations = new Map<number, Promise<void>>()
 const agents = createAgentRelay({
-  changed: (state) => broadcast({ type: "agents", state }),
-  badgesChanged: () => void updateBadges(),
+  changed: (state) => {
+    broadcast({ type: "agents", state })
+    void updateActiveTabs()
+  },
+  badgesChanged: () => { void updateBadges(); void updateActiveTabs() },
 })
 
+let toolbarMode = "sidepanel"
+let sidepanelConnect: ReturnType<typeof agents.connectTo> | undefined
+async function configureToolbar() {
+  const stored = await chrome.storage.local.get(TOOLBAR_MODE_KEY)
+  toolbarMode = stored[TOOLBAR_MODE_KEY] === "attach" ? "attach" : "sidepanel"
+  await chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: toolbarMode === "sidepanel" })
+}
+void configureToolbar()
+chrome.storage.onChanged.addListener((changes, area) => { if (area === "local" && TOOLBAR_MODE_KEY in changes) void configureToolbar() })
 chrome.action.onClicked.addListener((tab) => {
-  // Before setup (or while the relay refuses this browser, or speaks another version) a click can't reach an agent:
-  // show the onboarding page, which says what to do, instead of queueing it silently.
-  const { status } = agents.state()
-  if (status === "unpaired" || status === "untrusted" || status === "incompatible") return void openOnboarding()
-  if (tab.id !== undefined) agents.attachTab(tab.id)
+  if (toolbarMode !== "attach") return
+  const status = agents.state().status
+  if (status === "unpaired" || status === "untrusted" || status === "incompatible") {
+    void chrome.tabs.create({ url: chrome.runtime.getURL("onboarding.html") })
+  } else if (tab.id !== undefined) void agents.attachTab(tab.id)
 })
 
 declare const __OPENCODE_BROWSER_TEST_HOOKS__: boolean
-// Test builds only (OPENCODE_BROWSER_TEST_HOOKS=1 when building): the stress harness clicks the toolbar button through
-// this worker's DevTools target, as CDP can't click browser UI. Pages can't reach the worker's globals, and other
-// builds compile this out.
 if (__OPENCODE_BROWSER_TEST_HOOKS__)
   Object.assign(globalThis, { __opencodeBrowserTest: { toolbarClick: (tabId: number) => agents.attachTab(tabId) } })
 
 chrome.runtime.onConnect.addListener((port) => {
-  // Only this extension's own pages may drive the relay: a content script in a page shares our extension id, but its
-  // sender URL is the page's, not chrome-extension://<id>/.
   const sender = port.sender
   const origin = `chrome-extension://${chrome.runtime.id}`
   const page = sender?.id === chrome.runtime.id &&
@@ -39,7 +44,7 @@ chrome.runtime.onConnect.addListener((port) => {
     (sender.origin === undefined || sender.origin === origin || sender.origin === `${origin}/`)
   if (port.name !== STATUS_PORT || !page) return
   pages.add(port)
-  port.onDisconnect.addListener(() => pages.delete(port))
+  port.onDisconnect.addListener(() => { pages.delete(port); windows.delete(port) })
   port.onMessage.addListener((message: FromStatusPage) => {
     if (typeof message !== "object" || message === null) return
     if (message.type === "agents.reconnect") agents.reconnect()
@@ -48,12 +53,79 @@ chrome.runtime.onConnect.addListener((port) => {
     if (message.type === "pairing.link")
       void agents.pairLink(message.code, message.port).then((ok) => post(port, { type: "pairing.link.result", ok }))
     if (message.type === "relay.connect")
-      void agents.connectTo(message.address, message.code).then((result) => post(port, { type: "relay.result", ...result }))
+      void connectRelay(message).then((result) => post(port, { type: "relay.result", ...result })).catch(() => post(port, { type: "relay.result", status: "untrusted" }))
+    if (message.type === "tab.activeInfo") {
+      if (Number.isInteger(message.windowId)) windows.set(port, message.windowId!)
+      void sendActiveTab(port)
+    }
+    if (message.type === "tab.attachCurrent" || message.type === "tab.toggleAttach" || message.type === "tab.ensureAttached" || message.type === "handoff.complete")
+      void handleTabRequest(port, message)
   })
   post(port, { type: "agents", state: agents.state() })
 })
 
-// Content scripts (page status, handoffs) talk to the relay link; extension pages ask it for diagnostics.
+async function connectRelay(message: Extract<FromStatusPage, { type: "relay.connect" }>) {
+  if (!message.ifNeeded) return agents.connectTo(message.address, message.code)
+  if (agents.state().status === "connected") return { status: "connected" as const, address: agents.state().relay.address }
+  if (!sidepanelConnect) sidepanelConnect = agents.connectTo(message.address, message.code).finally(() => { sidepanelConnect = undefined })
+  return sidepanelConnect
+}
+
+async function tabInfo(tabId: number): Promise<ActiveTabInfo> {
+  const tab = await chrome.tabs.get(tabId)
+  const attached = agents.state().tabs.find((item) => item.tabId === tabId)
+  return { tabId, windowId: tab.windowId, title: tab.title || "", url: tab.url || "", attached: !!attached,
+    badge: agents.badge(tabId)?.text || "", pageStatus: attached?.status }
+}
+
+async function activeTab(windowId?: number) {
+  const [tab] = await chrome.tabs.query(windowId === undefined ? { active: true, lastFocusedWindow: true } : { active: true, windowId })
+  return tab?.id === undefined ? null : tabInfo(tab.id)
+}
+
+async function sendActiveTab(port: chrome.runtime.Port) {
+  const tab = await activeTab(windows.get(port)).catch(() => null)
+  post(port, { type: "tab.activeInfo", tab })
+}
+
+async function updateActiveTabs() {
+  await Promise.all([...windows.keys()].map(sendActiveTab))
+}
+
+type TabRequest = Extract<FromStatusPage, { requestId: string }>
+async function handleTabRequest(port: chrome.runtime.Port, message: TabRequest) {
+  try {
+    const current = message.type === "tab.attachCurrent" ? await activeTab(message.windowId ?? windows.get(port)) : null
+    const tabId = message.type === "tab.attachCurrent" ? current?.tabId : message.tabId
+    if (!Number.isInteger(tabId)) throw new Error("没有可操作的当前标签页")
+    const id = tabId!
+    // 同一个标签页的点击串行化，避免 @当前页 与借出按钮互相切换挂载状态。
+    const previous = tabOperations.get(id) ?? Promise.resolve()
+    const operation = previous.catch(() => {}).then(async () => {
+      const before = await tabInfo(id)
+      if (message.type === "handoff.complete") {
+        agents.completeHandoff(id, message.handoffId)
+        return
+      }
+      if (message.type === "tab.ensureAttached" && before.attached) return
+      if (agents.state().status !== "connected") throw new Error("请先连接 Browse Relay")
+      const desired = message.type === "tab.ensureAttached" || !before.attached
+      await agents.attachTab(id)
+      const deadline = Date.now() + 8_000
+      while ((await tabInfo(id)).attached !== desired) {
+        if (Date.now() > deadline) throw new Error("标签页挂载未确认，请检查该页面是否支持调试")
+        await new Promise((resolve) => setTimeout(resolve, 100))
+      }
+    })
+    tabOperations.set(id, operation)
+    try { await operation } finally { if (tabOperations.get(id) === operation) tabOperations.delete(id) }
+    post(port, { type: "tab.result", requestId: message.requestId, ok: true, tab: await tabInfo(id).catch(() => undefined) })
+    await sendActiveTab(port)
+  } catch (error) {
+    post(port, { type: "tab.result", requestId: message.requestId, ok: false, error: error instanceof Error ? error.message : String(error) })
+  }
+}
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   const relay = agents.runtimeMessage(message, sender, sendResponse)
   if (relay !== undefined) return relay
@@ -67,52 +139,30 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 })
 
 chrome.runtime.onInstalled.addListener((details) => {
+  void configureToolbar()
   if (details.reason === "install") void chrome.tabs.create({ url: chrome.runtime.getURL("onboarding.html?first-run") })
 })
-
-/** Focuses an open onboarding tab, or opens one. */
-async function openOnboarding() {
-  const page = chrome.runtime.getURL("onboarding.html")
-  const open = (await chrome.tabs.query({}).catch(() => [])).find((tab) => tab.url?.startsWith(page))
-  if (open?.id === undefined) return void chrome.tabs.create({ url: page })
-  await chrome.tabs.update(open.id, { active: true })
-  if (open.windowId !== undefined) await chrome.windows.update(open.windowId, { focused: true })
-}
-
-// Tab-specific badges reset when a tab navigates; the relay's state for it doesn't.
+chrome.tabs.onActivated.addListener(() => { void updateActiveTabs() })
+chrome.tabs.onRemoved.addListener(() => { void updateActiveTabs() })
 chrome.tabs.onUpdated.addListener((_tabId, change, tab) => {
   if (change.url || change.status === "loading") void updateBadges([tab])
+  if (change.url || change.title || change.status) void updateActiveTabs()
 })
-
+chrome.windows.onFocusChanged.addListener(() => { void updateActiveTabs() })
 void chrome.action.setBadgeBackgroundColor({ color: BADGE_COLORS.default })
 void chrome.action.setBadgeTextColor?.({ color: "#ffffff" })
 
-/** The toolbar badge shows the agents' state for a tab they use: ON, RUN while one works, WAIT for the user. */
 async function updateBadges(tabs?: chrome.tabs.Tab[]) {
   const targets = tabs ?? (await chrome.tabs.query({}))
-  await Promise.all(
-    targets.map(async (tab) => {
-      if (tab.id === undefined) return
-      const badge = agents.badge(tab.id)
-      await chrome.action.setBadgeText({ tabId: tab.id, text: badge?.text ?? "" }).catch(() => undefined)
-      await chrome.action
-        .setBadgeBackgroundColor({ tabId: tab.id, color: BADGE_COLORS[badge?.text ?? ""] ?? BADGE_COLORS.default })
-        .catch(() => undefined)
-      await chrome.action
-        .setTitle({ tabId: tab.id, title: badge?.title ?? "browse · Click to let agents use this tab" })
-        .catch(() => undefined)
-    }),
-  )
+  await Promise.all(targets.map(async (tab) => {
+    if (tab.id === undefined) return
+    const badge = agents.badge(tab.id)
+    await chrome.action.setBadgeText({ tabId: tab.id, text: badge?.text ?? "" }).catch(() => undefined)
+    await chrome.action.setBadgeBackgroundColor({ tabId: tab.id, color: BADGE_COLORS[badge?.text ?? ""] ?? BADGE_COLORS.default }).catch(() => undefined)
+    await chrome.action.setTitle({ tabId: tab.id, title: badge?.title ?? "browse · 打开侧边栏对话与浏览器调试" }).catch(() => undefined)
+  }))
 }
-
-function broadcast(message: ToStatusPage) {
-  pages.forEach((port) => post(port, message))
-}
-
+function broadcast(message: ToStatusPage) { pages.forEach((port) => post(port, message)) }
 function post(port: chrome.runtime.Port, message: ToStatusPage) {
-  try {
-    port.postMessage(message)
-  } catch {
-    pages.delete(port)
-  }
+  try { port.postMessage(message) } catch { pages.delete(port); windows.delete(port) }
 }

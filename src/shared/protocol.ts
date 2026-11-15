@@ -192,17 +192,35 @@ export type RelaySettings = { humanInput: HumanInput }
 export type RelayOverrides = { agentWindow?: "current" | "separate"; humanInput?: HumanInput }
 
 export const STATUS_PORT = "opencode-browser.status"
+export const TOOLBAR_MODE_KEY = "toolbarActionMode"
+
+export type ActiveTabInfo = {
+  tabId: number
+  windowId: number
+  title: string
+  url: string
+  attached: boolean
+  badge: string
+  pageStatus?: PageStatus
+}
 
 export type ToStatusPage =
   | { type: "agents"; state: AgentRelayState }
+  | { type: "tab.activeInfo"; tab: ActiveTabInfo | null }
+  | { type: "tab.result"; requestId: string; ok: boolean; tab?: ActiveTabInfo; error?: string }
   | { type: "pairing.link.result"; ok: boolean }
   /** The outcome of `relay.connect`: the status the new connection settled on, or why nothing was tried. */
   | { type: "relay.result"; status: AgentRelayStatus | "invalid-address" | "invalid-code"; address?: string }
 export type FromStatusPage =
   /** Save the relay address (empty or localhost: this computer) and, when given, a pairing code; reconnect and report how it went. */
-  | { type: "relay.connect"; address: string; code: string }
+  | { type: "relay.connect"; address: string; code: string; ifNeeded?: boolean }
   | { type: "agents.reconnect" }
   | { type: "tabs.cleanup" }
   /** A one-time code from install's link (welcome.html#code=…), and the relay port when it isn't 19988. */
   | { type: "pairing.link"; code: string; port?: number }
   | { type: "autoUpdate.set"; mode: AutoUpdateMode }
+  | { type: "tab.activeInfo"; windowId?: number }
+  | { type: "tab.attachCurrent"; requestId: string; windowId?: number }
+  | { type: "tab.toggleAttach"; tabId: number; requestId: string }
+  | { type: "tab.ensureAttached"; tabId: number; requestId: string }
+  | { type: "handoff.complete"; tabId: number; handoffId: string; requestId: string }

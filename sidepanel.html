@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="zh-CN" data-booting="true">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="color-scheme" content="dark light" />
+  <meta name="referrer" content="no-referrer" />
+  <title>Browse · 这是一个助手</title>
+  <link rel="stylesheet" href="/src/sidepanel/chat/style.css" />
+  <link rel="stylesheet" href="/src/sidepanel/chat/layout.css" />
+  <link rel="stylesheet" href="/src/sidepanel/chat/home.css" />
+  <link rel="stylesheet" href="/src/sidepanel/chat/subagents.css" />
+  <link rel="stylesheet" href="/src/sidepanel/chat/select.css" />
+  <link rel="stylesheet" href="/src/sidepanel/style.css" />
+  <script type="module" src="/src/sidepanel/index.ts"></script>
+</head>
+<body>
+  <header id="connector" aria-label="Browse 调试连接栏">
+    <div class="connector-heading"><strong>Browse 调试连接栏</strong><button id="settings" title="设置 Harness 地址" aria-label="设置 Harness 地址">⚙</button></div>
+    <div class="connector-status"><span id="harness-status" role="status">Harness · 检测中</span><span id="relay-status" role="status">Relay · offline</span><button id="pair" title="连接 Harness 后自动配对 Browse Relay">连接调试</button></div>
+    <div class="connector-tab"><span id="tab-badge">—</span><span id="tab-title">正在读取当前页…</span></div>
+    <div class="connector-actions"><button id="attach" disabled>借出此页</button><button id="mention" disabled title="挂载当前页并插入浏览器调试上下文">@当前页</button><button id="handoff" hidden>继续执行</button></div>
+    <p id="connector-hint" class="hint" role="status" hidden></p>
+    <form id="settings-form" hidden>
+      <label class="toolbar-setting" title="关闭后，点击扩展图标会直接借出或收回当前页"><input id="toolbar-sidepanel" type="checkbox" checked />点击图标打开侧边栏</label>
+      <label>Harness 地址<input id="server-origin" type="url" required placeholder="http://127.0.0.1:7878" /></label>
+      <button type="submit">保存并重连</button>
+    </form>
+  </header>
+  <main id="app" class="app" data-phase="boot"><div class="boot-screen"><span class="spinner" aria-hidden="true"></span><p class="boot-text">正在连接电脑端…</p></div></main>
+  <div id="overlay-root"></div><div id="toast-root"></div>
+</body>
+</html>
