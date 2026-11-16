@@ -1,6 +1,7 @@
 import { SIDEPANEL_PORT, type ActiveTabInfo, type AgentRelayState, type FromSidepanel, type ToSidepanel } from "../shared/protocol"
 import type { BrowserReference } from "../shared/browser-reference"
-import { apiOrigin, frameUrl } from "./config"
+import { apiOrigin, frameUrl, loadServerOrigin } from "./config"
+import { extensionSession } from "./session"
 import { browserContext, confirmedInsertion, needsPairing, pairingAddress, tabReference, validFrameMessage, type RemoteStatus } from "./context"
 
 const frame = document.getElementById("renderer") as HTMLIFrameElement
@@ -12,6 +13,7 @@ let suspended = false
 let browserTabs: BrowserReference[] = [], browserTabsActive = false
 let browserId = "", browserTabsError: string | undefined
 let relayResult: { resolve: (status: string) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> } | undefined
+let pairingTask: Promise<void> | undefined
 const pending = new Map<string, { resolve: (tab: ActiveTabInfo | undefined) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> }>()
 const framePending = new Map<string, { resolve: (result: unknown) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> }>()
 let dragSession: string | undefined
@@ -93,10 +95,21 @@ function resetFrameRequests() {
 function respond(requestId: string, ok: boolean, result?: unknown, error?: unknown) {
   frame.contentWindow?.postMessage({ type: "pi-desktop:browse-response", requestId, ok, ...(ok ? { result } : { error: error instanceof Error ? error.message : String(error ?? "操作失败") }) }, apiOrigin())
 }
+async function handleExtensionSession(requestId: string) {
+  const target = frame.contentWindow, origin = apiOrigin()
+  try {
+    const token = await extensionSession(origin)
+    target?.postMessage({ type: "pi-desktop:extension-session-response", requestId, ok: true, token }, origin)
+  } catch (error) {
+    target?.postMessage({ type: "pi-desktop:extension-session-response", requestId, ok: false, error: error instanceof Error ? error.message : String(error) }, origin)
+  }
+}
 window.addEventListener("message", (event) => {
   if (!validFrameMessage(event, frame.contentWindow, apiOrigin())) return
   const data = event.data
-  if (data.type === "pi-desktop:remote-status") {
+  if (data.type === "pi-desktop:extension-session-request" && typeof data.requestId === "string") {
+    void handleExtensionSession(data.requestId)
+  } else if (data.type === "pi-desktop:remote-status") {
     const justAuthenticated = data.authenticated === true && !auth.authenticated
     auth = { authenticated: data.authenticated === true, online: data.online === true, canCompose: data.canCompose === true }
     if (!available()) { resetFrameRequests(); clearTabs() }
@@ -190,31 +203,33 @@ function connect() {
   send({ type: "tab.activeInfo", windowId })
 }
 function relayConnected() { return state?.status === "connected" }
-async function waitForRelayConnected(timeoutMs = 12_000) {
+async function waitForRelayReady(timeoutMs = 12_000) {
   const deadline = Date.now() + timeoutMs
-  while (!relayConnected()) {
+  while (!relayConnected() && !needsPairing(state?.status)) {
     if (Date.now() >= deadline) throw new Error("浏览器连接服务连接超时，请到设置页检查连接")
     await new Promise((resolve) => setTimeout(resolve, 100))
   }
 }
-async function pairRelay() {
-  if (pairing || relayConnected()) return
-  if (!auth.authenticated || !auth.online) throw new Error("请先使用主机密码登录主程序")
+function pairRelay(): Promise<void> {
+  if (!pairingTask) pairingTask = connectRelay().finally(() => { pairingTask = undefined })
+  return pairingTask
+}
+async function connectRelay() {
+  if (relayConnected()) return
+  if (!auth.authenticated || !auth.online) throw new Error("请先登录主程序")
   if (!port) throw new Error("扩展后台正在重连")
-  if (state?.status === "offline") {
-    if (ensuring) {
-      await waitForRelayConnected()
-      return
-    }
-    ensuring = true; lastEnsure = Date.now(); sendFrameStatus()
-    try { await frameRequest("browse.ensureRelay"); send({ type: "agents.reconnect" }) }
-    finally { ensuring = false; sendFrameStatus() }
-    await waitForRelayConnected()
-    return
-  }
-  if (!needsPairing(state?.status)) return
-  pairing = true; lastAttempt = Date.now(); sendFrameStatus()
+  pairing = true; sendFrameStatus()
   try {
+    if (state?.status === "offline") {
+      ensuring = true; lastEnsure = Date.now(); sendFrameStatus()
+      try {
+        await frameRequest("browse.ensureRelay")
+        send({ type: "agents.reconnect" })
+        await waitForRelayReady()
+      } finally { ensuring = false; sendFrameStatus() }
+    }
+    if (relayConnected() || !needsPairing(state?.status)) return
+    lastAttempt = Date.now()
     const result = await frameRequest("browse.mintPairingCode") as { code: string; port: number; endpoint: string }
     if (!result?.code) throw new Error("主程序未返回浏览器连接服务配对码")
     if (relayConnected()) return
@@ -268,6 +283,7 @@ window.addEventListener("pageshow", () => {
   frame.contentWindow?.postMessage({ type: "pi-desktop:status-request" }, apiOrigin())
 })
 async function boot() {
+  await loadServerOrigin()
   windowId = (await chrome.windows.getCurrent()).id
   frame.src = frameUrl(apiOrigin(), chrome.runtime.getURL("").replace(/\/$/, ""))
   connect(); announceReady(); sendFrameStatus()

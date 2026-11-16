@@ -8,6 +8,10 @@ export function normalizeServerOrigin(input: string): string {
     throw new Error("请填写 http://主机:端口 或 https://主机:端口")
   return url.origin
 }
+export function isLoopbackOrigin(origin: string): boolean {
+  const host = new URL(normalizeServerOrigin(origin)).hostname
+  return host === "localhost" || host === "[::1]" || /^127(?:\.\d{1,3}){3}$/.test(host)
+}
 export function apiOrigin(): string { return serverOrigin }
 export function frameUrl(server: string, parentOrigin: string): string {
   if (!/^chrome-extension:\/\/[a-p]{32}$/.test(parentOrigin)) throw new Error("无效的扩展来源")

@@ -155,6 +155,47 @@ test("未登录或没有当前页时向 iframe 返回明确启动错误", () => 
   expect(pickerReplies("no-tab-drag")).toMatchObject([{ message: { ok: false, error: expect.stringContaining("网页") }, origin: server }])
 })
 
+test("本机会话请求只接受真实 iframe，并转发内存令牌与错误", async () => {
+  const originalFetch = globalThis.fetch
+  let calls = 0
+  globalThis.fetch = (async () => { calls++; return Response.json({ ok: true, result: { token: "frame-test-session" } }) }) as unknown as typeof fetch
+  try {
+    const message = { type: "pi-desktop:extension-session-request", requestId: "session-1" }
+    receive(message, "https://untrusted.test")
+    receive(message, server, {})
+    await settle()
+    expect(calls).toBe(0)
+    receive(message)
+    await settle()
+    expect(calls).toBe(1)
+    expect(messages.at(-1)).toEqual({ message: { type: "pi-desktop:extension-session-response", requestId: "session-1", ok: true, token: "frame-test-session" }, origin: server })
+    globalThis.fetch = (async () => { throw new Error("主程序离线") }) as unknown as typeof fetch
+    receive({ ...message, requestId: "session-2" })
+    await settle()
+    expect(messages.at(-1)).toEqual({ message: { type: "pi-desktop:extension-session-response", requestId: "session-2", ok: false, error: "主程序离线" }, origin: server })
+  } finally { globalThis.fetch = originalFetch }
+})
+
+test("离线 Relay 启动后进入待配对状态，继续自动配对且不重复启动", async () => {
+  receive({ type: "pi-desktop:remote-status", authenticated: false, online: false, canCompose: false })
+  agent("offline")
+  receive({ type: "pi-desktop:remote-status", authenticated: true, online: true, canCompose: true })
+  await settle()
+  const ensure = messages.findLast((item) => item.message.type === "pi-desktop:request" && item.message.method === "browse.ensureRelay")!.message
+  receive({ type: "pi-desktop:response", requestId: ensure.requestId, ok: true })
+  agent("unpaired")
+  await settle()
+  expect(background).toContainEqual({ type: "agents.reconnect" })
+  const mint = messages.findLast((item) => item.message.type === "pi-desktop:request" && item.message.method === "browse.mintPairingCode")!.message
+  expect(messages.filter((item) => item.message.type === "pi-desktop:request" && item.message.method === "browse.ensureRelay")).toHaveLength(1)
+  receive({ type: "pi-desktop:response", requestId: mint.requestId, ok: true, result: { code: "test-pair", endpoint: "http://127.0.0.1:19988", port: 19988 } })
+  await settle()
+  expect(background.at(-1)).toEqual({ type: "relay.connect", address: "127.0.0.1:19988", code: "test-pair", ifNeeded: true })
+  agent("connected")
+  port.onMessage.emit({ type: "relay.result", status: "connected" })
+  await settle()
+})
+
 test("显式取消与 iframe 重载会向后台结束当前捕捉", () => {
   ready()
   picker("start", "cancel-drag")

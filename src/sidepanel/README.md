@@ -4,11 +4,13 @@
 
 默认 Harness 地址为 `http://127.0.0.1:7878`，在独立的 `settings.html` 设置页中修改。地址保存到 `chrome.storage.local` 的 `chromeSidebarServerOrigin`，与 `src/sidepanel/config.ts` 共用；Relay 地址、配对码和浏览器配置继续在设置页的“高级设置”区域维护。
 
-iframe 地址为 `/?webRemote=true&parentOrigin=chrome-extension://<扩展ID>`。主机密码、设备 token、IPC 与附件请求全部在 iframe 内处理。扩展只收到认证/在线状态和已请求操作的结果，不接收 Bearer。双方都验证 `event.source` 和精确 `event.origin`。
+iframe 地址为 `/?webRemote=true&parentOrigin=chrome-extension://<扩展ID>`。本机地址（`localhost`、`127.0.0.0/8`、`[::1]`）由 iframe 请求扩展会话，扩展在真实 `chrome-extension://` 上下文中向已配置的 API origin 发送 `POST /api/extension-session`，使用 `Content-Type: application/json` 和空对象请求体。服务端须核对真实允许的扩展 Origin 和 loopback socket；返回 `{ok:true,result:{token,deviceId,deviceName,expiresAt}}`。扩展只提取 `result.token` 传回 iframe，令牌仅在内存中流转，不写 storage；请求不带 Cookie、禁止重定向并在 12 秒后超时。跨机地址继续在 iframe 内使用主机密码登录。IPC 与附件请求仍由 iframe 处理，双方验证 `event.source` 和精确 `event.origin`。
 
 消息格式：
 
 - 父 → 子：`{type:"pi-desktop:status-request"}` 查询 Harness 状态。
+- 子 → 父：`{type:"pi-desktop:extension-session-request",requestId}` 请求本机免密码会话，仅接受当前 iframe 的精确 source／origin。
+- 父 → 子：`{type:"pi-desktop:extension-session-response",requestId,ok:true,token}` 或 `{type:"pi-desktop:extension-session-response",requestId,ok:false,error}`，`error` 为字符串；跨机请求返回密码登录提示，不访问会话端点。
 - 子 → 父：`{type:"pi-desktop:remote-status",authenticated,online,canCompose}`。
 - 父 → 子：`{type:"pi-desktop:browse-status",authenticated,online,busy,borrowed,browserContext}` 推送当前 tab 操作状态。
 - 子 → 父：`{type:"pi-desktop:browse-request",requestId,method}`，method 为 `toggleAttach`、`insertCurrent` 或 `handoff`。
@@ -17,11 +19,11 @@ iframe 地址为 `/?webRemote=true&parentOrigin=chrome-extension://<扩展ID>`�
 - 子 → 父：`{type:"pi-desktop:element-picker",action:"start"|"end",sessionId,cancel?}` 发送工具栏抓手的拖动起止；`sessionId` 为 1–80 个小写字母、数字或连字符，`end` 只匹配当前会话，`cancel:true` 立即取消，否则保留后台既有的 drop／dragend 竞态处理。
 - 父 → 子：`{type:"pi-desktop:element-picker-result",sessionId,ok,error?}` 返回启动错误或后台确认的投递结果；未匹配的旧结果不转发。此消息沿用精确 iframe source／origin 校验。
 
-Browse 操作收到请求后会先自动 ensure 或配对 Relay，再执行后台 tab/handoff 操作。借出/收回当前页与 `@当前页` 位于原版 Composer 工具栏，Relay 未配对时会返回连接错误而不是静默无响应。
+Browse 操作收到请求后会先自动 ensure 或配对 Relay，再执行后台 tab/handoff 操作。离线时先 ensure 并重连，等待 `connected` 或 `unpaired/untrusted`；待配对时自动获取一次性配对码并交由后台连接，并发操作共用同一次配对任务。配对码不显示在侧栏，无需手动配对。借出/收回当前页与 `@当前页` 位于原版 Composer 工具栏，失败会返回连接错误。
 
 ## 浏览器引用
 
-扩展名称为“这是一个助手 · 浏览器”，设置、引导和通知使用中文及主程序图标。构建后在 Chrome 扩展管理页重新加载扩展，再打开侧栏并登录；同时需要包含浏览器引用 IPC 的新版主程序。
+扩展名称为“这是一个助手 · 浏览器”，设置、引导和通知使用中文及主程序图标。构建后在 Chrome 扩展管理页重新加载扩展，再打开侧栏；本机由主程序自动签发会话，跨机使用主机密码。同时需要包含扩展会话端点与浏览器引用 IPC 的新版主程序。
 
 侧栏开启且在线时，桌面和侧栏 Composer 输入 `@` 均可搜索所有已打开标签页的标题或 URL，插入页面 chip；不需要先借出标签页。页面、选文、DOM 三类 chip 使用不同图标，悬停可查看完整引用。
 
@@ -38,7 +40,7 @@ Browse 操作收到请求后会先自动 ensure 或配对 Relay，再执行后�
 ```sh
 bun run typecheck
 bun run build
-bun test ./test/sidepanel.test.ts ./test/browser-references.test.ts ./test/element-picker-state.test.ts
+bun test ./test/sidepanel.test.ts ./test/sidepanel-session.test.ts ./test/browser-references.test.ts ./test/element-picker-state.test.ts
 bun test ./test/isolated/sidepanel-frame.ts
 bun test ./test/isolated/sidepanel-background.ts
 ```
