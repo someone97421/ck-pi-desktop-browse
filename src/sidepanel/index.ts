@@ -14,6 +14,37 @@ let browserId = "", browserTabsError: string | undefined
 let relayResult: { resolve: (status: string) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> } | undefined
 const pending = new Map<string, { resolve: (tab: ActiveTabInfo | undefined) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> }>()
 const framePending = new Map<string, { resolve: (result: unknown) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> }>()
+let dragSession: string | undefined
+const pickerResults = new Set<string>()
+function pickerResult(sessionId: string, ok: boolean, error?: string) {
+  frame.contentWindow?.postMessage({ type: "pi-desktop:element-picker-result", sessionId, ok, ...(error ? { error } : {}) }, apiOrigin())
+}
+function endPick(cancel: boolean) {
+  const id = dragSession
+  dragSession = undefined
+  if (id && port) { try { send({ type: "picker.end", sessionId: id, cancel }) } catch {} }
+}
+function startPick(sessionId: string) {
+  if (!/^[a-z0-9-]{1,80}$/.test(sessionId)) {
+    pickerResult(sessionId, false, "DOM 捕捉会话标识无效，请重新拖动抓手")
+    return
+  }
+  try {
+    if (!available()) throw new Error("请先登录侧栏并等待连接就绪")
+    if (!port) throw new Error("扩展后台正在重连，请稍后重试")
+    if (!active) throw new Error("请先打开要捕捉的网页")
+    endPick(true)
+    dragSession = sessionId
+    pickerResults.clear(); pickerResults.add(sessionId)
+    send({ type: "picker.start", sessionId, tabId: active.tabId })
+  } catch (error) {
+    if (dragSession === sessionId) endPick(true)
+    pickerResults.delete(sessionId)
+    pickerResult(sessionId, false, error instanceof Error ? error.message : "DOM 捕捉启动失败，请重试")
+  }
+}
+window.addEventListener("keydown", (event) => { if (event.key === "Escape") endPick(true) }, true)
+document.addEventListener("visibilitychange", () => { if (document.hidden) endPick(true) })
 
 function available() { return auth.authenticated && auth.online && !suspended }
 function sendFrameStatus() {
@@ -55,6 +86,7 @@ async function insertReference(reference: BrowserReference, target?: "current") 
   return result
 }
 function resetFrameRequests() {
+  endPick(true)
   for (const item of framePending.values()) { clearTimeout(item.timer); item.reject(new Error("主程序页面已重新载入、离线或退出登录")) }
   framePending.clear()
 }
@@ -78,6 +110,9 @@ window.addEventListener("message", (event) => {
     else item.reject(new Error(typeof data.error === "string" ? data.error : "主程序操作失败"))
   } else if (data.type === "pi-desktop:browse-request" && typeof data.requestId === "string") {
     void handleBrowseRequest(data.requestId, data.method)
+  } else if (data.type === "pi-desktop:element-picker" && typeof data.sessionId === "string") {
+    if (data.action === "start") startPick(data.sessionId)
+    else if (data.action === "end" && data.sessionId === dragSession) endPick(data.cancel === true)
   }
 })
 frame.addEventListener("load", () => {
@@ -116,7 +151,7 @@ function connect() {
   connected.onMessage.addListener((event: ToSidepanel) => {
     if (port !== connected) return
     if (event.type === "agents") { state = event.state; sendFrameStatus(); void autoPair() }
-    if (event.type === "tab.activeInfo") { active = event.tab; sendFrameStatus() }
+    if (event.type === "tab.activeInfo") { if (active?.tabId !== event.tab?.tabId || active?.url !== event.tab?.url) endPick(true); active = event.tab; sendFrameStatus() }
     if (event.type === "browser.tabs") {
       if (event.browserId) browserId = event.browserId
       browserTabsError = event.error
@@ -125,6 +160,10 @@ function connect() {
       sendFrameTabs()
     }
     if (event.type === "reference.request") void forwardReference(event, connected)
+    if (event.type === "picker.result" && pickerResults.delete(event.sessionId)) {
+      if (dragSession === event.sessionId) endPick(true)
+      pickerResult(event.sessionId, event.ok, event.error)
+    }
     if (event.type === "relay.result" && relayResult) {
       clearTimeout(relayResult.timer); relayResult.resolve(event.status); relayResult = undefined
     }
@@ -140,6 +179,7 @@ function connect() {
     void chrome.runtime.lastError
     if (port !== connected) return
     port = undefined; state = undefined; active = null
+    endPick(true); pickerResults.clear()
     clearTabs(); resetFrameRequests(); sendFrameStatus()
     for (const item of pending.values()) { clearTimeout(item.timer); item.reject(new Error("扩展后台已断开，请核对当前页状态")) }
     pending.clear()
@@ -218,6 +258,7 @@ async function handleBrowseRequest(requestId: string, method: unknown) {
 }
 window.addEventListener("pagehide", () => {
   suspended = true
+  endPick(true)
   clearTabs(); resetFrameRequests(); announceReady()
 })
 window.addEventListener("pageshow", () => {

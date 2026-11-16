@@ -33,6 +33,62 @@ impl Relay {
         ids.into_iter().filter_map(|tab| self.tab_info(&st, tab)).collect()
     }
 
+    pub async fn discover_tabs(self: &Arc<Self>) -> anyhow::Result<Vec<TabInfo>> {
+        let links: Vec<_> = self.st().links.iter().filter(|link| link.connected()).cloned().collect();
+        let queries = links.iter().map(|link| self.ext_link(link, "tabs.query", json!({})));
+        let replies = futures_util::future::join_all(queries).await;
+        let mut tabs = self.tab_infos();
+        let mut answered = false;
+        let mut failures = Vec::new();
+        for (link, reply) in links.iter().zip(replies) {
+            let reply = match reply {
+                Ok(reply) if reply["tabs"].is_array() => reply,
+                Ok(_) => { failures.push(format!("{}: 浏览器扩展未返回标签页列表，请重新加载新版扩展", link.id)); continue; }
+                Err(error) => { failures.push(format!("{}: {error}", link.id)); continue; }
+            };
+            answered = true;
+            let mut st = self.st();
+            for item in reply["tabs"].as_array().unwrap() {
+                let Some(local) = item["tabId"].as_i64().filter(|id| *id >= 0) else { continue };
+                let tab = st.relay_tab_id(&link.key, local);
+                if st.tabs.get(&tab).is_some_and(|entry| entry.closing) { continue; }
+                if let Some(existing) = tabs.iter_mut().find(|entry| entry.tab == tab) {
+                    if let Some(url) = item["url"].as_str() { existing.url = url.to_string(); }
+                    if let Some(title) = item["title"].as_str() { existing.title = title.to_string(); }
+                    continue;
+                }
+                tabs.push(TabInfo {
+                    tab,
+                    url: item["url"].as_str().unwrap_or("").to_string(),
+                    title: item["title"].as_str().unwrap_or("").to_string(),
+                    lent: true,
+                    opener: None,
+                    options: TabOptions { browser: Some(link.id.clone()), ..TabOptions::default() },
+                });
+            }
+        }
+        if !answered && tabs.is_empty() && !failures.is_empty() { bail!("无法读取浏览器标签页：{}", failures.join("; ")); }
+        tabs.sort_by_key(|tab| tab.tab);
+        Ok(tabs)
+    }
+
+    pub async fn ensure_tab(self: &Arc<Self>, tab: i64) -> anyhow::Result<()> {
+        self.await_tab(tab).await;
+        if self.usable_tab(tab).is_ok() { return Ok(()); }
+        let _attaching = self.tab_attach.lock().await;
+        if self.usable_tab(tab).is_ok() { return Ok(()); }
+        if self.discover_tabs().await?.iter().any(|entry| entry.tab == tab) {
+            let mut attach = crate::tabs::Attach::new(tab, Owner::User);
+            attach.restore = true;
+            attach.expect_target = self.st().reconnect_owners.iter().find(|(_, known)| known.tab == tab).map(|(target, _)| target.clone());
+            if let Err(error) = self.setup_tab_locked(attach).await {
+                if self.usable_tab(tab).is_ok() { return Ok(()); }
+                bail!("标签页 {tab} 自动接入失败：{error}");
+            }
+        }
+        self.usable_tab(tab)
+    }
+
     /// A tab a call names that isn't attached yet comes back with a reconnecting browser's inventory (after a relay
     /// or worker restart): wait for that, briefly, instead of failing at once.
     pub async fn await_tab(&self, tab: i64) {
@@ -65,7 +121,7 @@ impl Relay {
         if st.reconnect_owners.values().any(|k| k.tab == tab) || st.restorable.values().any(|r| r.tab == tab) {
             bail!("Tab {tab} belongs to a browser that isn't connected right now. {}", self.not_connected_advice_for(&st));
         }
-        bail!("Tab {tab} isn't a browse tab: browse didn't open it and the user didn't lend it. Open one with navigate (without tab), or list the tabs you can use with tabs.")
+        bail!("Tab {tab} was not found in the connected browsers. It may have closed; list tabs to get its current id.")
     }
 
     /// The running call uses the tab: the tab counts as busy until the call ends, and the call's warnings include the
@@ -255,19 +311,17 @@ impl Browser for RelayBrowser {
     }
 
     async fn tabs(&self) -> anyhow::Result<Vec<TabInfo>> {
-        Ok(self.0.tab_infos())
+        self.0.discover_tabs().await
     }
 
     async fn close_tab(&self, tab: TabId) -> anyhow::Result<()> {
-        self.0.await_tab(tab).await;
-        self.0.usable_tab(tab)?;
+        self.0.ensure_tab(tab).await?;
         self.0.close_or_release(tab).await?;
         Ok(())
     }
 
     async fn cdp(&self, tab: TabId) -> anyhow::Result<Arc<dyn Cdp>> {
-        self.0.await_tab(tab).await;
-        self.0.usable_tab(tab)?;
+        self.0.ensure_tab(tab).await?;
         self.0.note_call_tab(tab);
         let mut st = self.0.st();
         let entry = st.tabs.get_mut(&tab).context("The tab went away")?;
@@ -289,17 +343,19 @@ impl Browser for RelayBrowser {
             if let Some(known) = st.reconnect_owners.values().find(|k| k.tab == tab) {
                 return Ok(known.state.clone());
             }
-            if let Some(gone) = st.gone_tab(tab) {
-                return Ok(gone.state.clone());
-            }
         }
-        self.0.usable_tab(tab)?;
+        let result = self.0.ensure_tab(tab).await;
+        {
+            let st = self.0.st();
+            if let Some(entry) = st.tabs.get(&tab) { return Ok(entry.state.clone()); }
+            if let Some(gone) = st.gone_tab(tab) { return Ok(gone.state.clone()); }
+        }
+        result?;
         bail!("Tab {tab} went away")
     }
 
     async fn handoff(&self, tab: TabId, message: &str) -> anyhow::Result<HandoffResult> {
-        self.0.await_tab(tab).await;
-        self.0.usable_tab(tab)?;
+        self.0.ensure_tab(tab).await?;
         self.0.note_call_tab(tab);
         self.0.run_handoff(tab, message, crate::presentation::DEFAULT_HANDOFF_TIMEOUT).await
     }

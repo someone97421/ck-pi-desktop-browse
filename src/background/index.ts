@@ -8,7 +8,7 @@ const BADGE_COLORS: Record<string, string> = { default: "#3b3b3b", RUN: "#b45309
 const pages = new Set<chrome.runtime.Port>()
 const windows = new Map<chrome.runtime.Port, number>()
 const tabOperations = new Map<number, Promise<void>>()
-const browserReferences = createBrowserReferences()
+const browserReferences = createBrowserReferences(ensureAttached)
 const agents = createAgentRelay({
   changed: (state) => {
     broadcast({ type: "agents", state })
@@ -97,6 +97,31 @@ async function updateActiveTabs() {
   await Promise.all([...windows.keys()].map(sendActiveTab))
 }
 
+async function withTabOperation(tabId: number, action: () => Promise<void>) {
+  const previous = tabOperations.get(tabId) ?? Promise.resolve()
+  const operation = previous.catch(() => {}).then(action)
+  tabOperations.set(tabId, operation)
+  try { await operation } finally { if (tabOperations.get(tabId) === operation) tabOperations.delete(tabId) }
+}
+
+async function changeAttachment(tabId: number, ensure: boolean) {
+  if (agents.state().status !== "connected") throw new Error("请先连接浏览器连接服务")
+  const before = await tabInfo(tabId)
+  if (ensure && before.attached) return
+  const desired = ensure || !before.attached
+  await agents.attachTab(tabId)
+  const deadline = Date.now() + 8_000
+  while ((await tabInfo(tabId)).attached !== desired) {
+    if (Date.now() > deadline) throw new Error("标签页挂载未确认，请检查该页面是否支持调试")
+    if (agents.state().status !== "connected") throw new Error("浏览器连接服务已断开，请重新连接")
+    await new Promise((resolve) => setTimeout(resolve, 100))
+  }
+}
+
+function ensureAttached(tabId: number) {
+  return withTabOperation(tabId, () => changeAttachment(tabId, true))
+}
+
 type TabRequest = Extract<FromStatusPage, { requestId: string }>
 async function handleTabRequest(port: chrome.runtime.Port, message: TabRequest) {
   try {
@@ -104,26 +129,14 @@ async function handleTabRequest(port: chrome.runtime.Port, message: TabRequest) 
     const tabId = message.type === "tab.attachCurrent" ? current?.tabId : message.tabId
     if (!Number.isInteger(tabId)) throw new Error("没有可操作的当前标签页")
     const id = tabId!
-    // 同一个标签页的点击串行化，避免 @当前页 与借出按钮互相切换挂载状态。
-    const previous = tabOperations.get(id) ?? Promise.resolve()
-    const operation = previous.catch(() => {}).then(async () => {
-      const before = await tabInfo(id)
+    await withTabOperation(id, async () => {
       if (message.type === "handoff.complete") {
+        await tabInfo(id)
         agents.completeHandoff(id, message.handoffId)
         return
       }
-      if (message.type === "tab.ensureAttached" && before.attached) return
-      if (agents.state().status !== "connected") throw new Error("请先连接浏览器连接服务")
-      const desired = message.type === "tab.ensureAttached" || !before.attached
-      await agents.attachTab(id)
-      const deadline = Date.now() + 8_000
-      while ((await tabInfo(id)).attached !== desired) {
-        if (Date.now() > deadline) throw new Error("标签页挂载未确认，请检查该页面是否支持调试")
-        await new Promise((resolve) => setTimeout(resolve, 100))
-      }
+      await changeAttachment(id, message.type === "tab.ensureAttached")
     })
-    tabOperations.set(id, operation)
-    try { await operation } finally { if (tabOperations.get(id) === operation) tabOperations.delete(id) }
     post(port, { type: "tab.result", requestId: message.requestId, ok: true, tab: await tabInfo(id).catch(() => undefined) })
     await sendActiveTab(port)
   } catch (error) {

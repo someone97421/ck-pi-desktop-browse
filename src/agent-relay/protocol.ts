@@ -44,6 +44,7 @@ const commandMethods = [
   "debugger.attach",
   "debugger.detach",
   "debugger.sendCommand",
+  "tabs.query",
   "tabs.create",
   "tabs.remove",
   "tabs.group",

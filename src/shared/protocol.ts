@@ -230,7 +230,10 @@ export type FromStatusPage =
 export type FromSidepanel = FromStatusPage
   | { type: "sidepanel.ready"; windowId: number; available: boolean }
   | { type: "reference.result"; requestId: string; ok: boolean; error?: string }
+  | { type: "picker.start"; sessionId: string; tabId: number }
+  | { type: "picker.end"; sessionId: string; cancel: boolean }
 
 export type ToSidepanel = ToStatusPage
   | { type: "browser.tabs"; browserId: string; active: boolean; tabs: BrowserReference[]; error?: string }
   | { type: "reference.request"; requestId: string; reference: BrowserReference }
+  | { type: "picker.result"; sessionId: string; ok: boolean; error?: string }

@@ -1,0 +1,48 @@
+name: 发布浏览器扩展
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: extension-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: 检查、打包与发布扩展
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
+        with:
+          bun-version-file: package.json
+      - run: bun install --frozen-lockfile
+      - name: 核对统一版本
+        run: |
+          bun scripts/release-check.ts --versions-only
+          echo "EXTENSION_VERSION=$(bun -p 'require("./cli/package.json").version')" >> "$GITHUB_ENV"
+      - run: bun run typecheck
+      - name: 构建固定 ID 的手动安装包
+        run: bun run package --unpacked
+      - name: 检查发布包并生成校验值
+        run: |
+          bun scripts/check-artifacts.ts --version "$EXTENSION_VERSION" --zip "release/browse-extension-$EXTENSION_VERSION.zip" --unpacked
+          cd release
+          sha256sum "browse-extension-$EXTENSION_VERSION.zip" > SHA256SUMS
+      - name: 发布到本 fork
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          cp docs/扩展发布说明.md "$RUNNER_TEMP/extension-release-notes.md"
+          printf '\n源码提交：`%s`\n' "$GITHUB_SHA" >> "$RUNNER_TEMP/extension-release-notes.md"
+          gh release create "v$EXTENSION_VERSION" \
+            "release/browse-extension-$EXTENSION_VERSION.zip" release/SHA256SUMS \
+            --target "$GITHUB_SHA" --title "浏览器扩展 $EXTENSION_VERSION" \
+            --notes-file "$RUNNER_TEMP/extension-release-notes.md"

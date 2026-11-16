@@ -150,6 +150,12 @@ export function createRelayCommands(deps: {
       case "debugger.sendCommand":
         TabCleanup.touch(number(params, "tabId"))
         return deps.sendCommand(params)
+      case "tabs.query": {
+        const tabs = await chrome.tabs.query({})
+        return { tabs: tabs.filter((tab) => tab.id !== undefined).map((tab) => ({
+          tabId: tab.id!, url: tab.url || "", title: tab.title || "", windowId: tab.windowId,
+        })) }
+      }
       case "tabs.create": {
         // In the background of the user's window (or the agents' own unfocused window, by setting), never in front
         // of the user's tabs.

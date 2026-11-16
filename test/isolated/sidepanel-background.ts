@@ -1,12 +1,13 @@
 import { expect, mock, test } from "bun:test"
 import { installChrome, StubEvent } from "../chrome-stub"
-import { STATUS_PORT, TOOLBAR_MODE_KEY, type AgentRelayState, type ToStatusPage } from "../../src/shared/protocol"
+import { SIDEPANEL_PORT, TOOLBAR_MODE_KEY, type AgentRelayState, type ToSidepanel } from "../../src/shared/protocol"
 
 const stub = installChrome()
 Object.assign(globalThis, { __OPENCODE_BROWSER_TEST_HOOKS__: false })
 const state: AgentRelayState = { status: "connected", pairing: "token", tabs: [], relay: { address: "127.0.0.1:19988", remote: false } }
 const attachCalls: number[] = [], handoffs: unknown[] = []
 let connections = 0
+let attachError: Error | undefined
 mock.module("../../src/background/agent-relay", () => ({ createAgentRelay: () => ({
   state: () => state, badge: () => undefined,
   connectTo: async (address: string) => {
@@ -18,6 +19,7 @@ mock.module("../../src/background/agent-relay", () => ({ createAgentRelay: () =>
   },
   attachTab: async (tabId: number) => {
     attachCalls.push(tabId)
+    if (attachError) throw attachError
     await new Promise((resolve) => setTimeout(resolve, 30))
     const found = state.tabs.findIndex((tab) => tab.tabId === tabId)
     if (found >= 0) state.tabs.splice(found, 1)
@@ -27,13 +29,13 @@ mock.module("../../src/background/agent-relay", () => ({ createAgentRelay: () =>
 }) }))
 await import("../../src/background/index")
 const events = stub.chrome as unknown as {
-  runtime: { onConnect: StubEvent }
+  runtime: { onConnect: StubEvent; onMessage: StubEvent }
   tabs: { onActivated: StubEvent; onUpdated: StubEvent }
   action: { onClicked: StubEvent }
 }
 function connect(senderUrl = "chrome-extension://stubextensionid/sidepanel.html") {
-  const frames: ToStatusPage[] = []
-  const port = { name: STATUS_PORT, sender: { id: "stubextensionid", url: senderUrl }, onDisconnect: new StubEvent(), onMessage: new StubEvent(), postMessage: (frame: ToStatusPage) => frames.push(frame) }
+  const frames: ToSidepanel[] = []
+  const port = { name: SIDEPANEL_PORT, sender: { id: "stubextensionid", url: senderUrl }, onDisconnect: new StubEvent(), onMessage: new StubEvent(), postMessage: (frame: ToSidepanel) => frames.push(frame) }
   events.runtime.onConnect.emit(port)
   return { frames, port, send: (message: unknown) => port.onMessage.emit(message) }
 }
@@ -46,13 +48,13 @@ test("侧栏始终查询所属窗口，导航后推送新的 URL", async () => {
   one.send({ type: "tab.activeInfo", windowId: a.id })
   two.send({ type: "tab.activeInfo", windowId: b.id })
   await settled()
-  expect(one.frames.at(-1)).toMatchObject({ type: "tab.activeInfo", tab: { tabId: a.tabs[0]!.id, url: "https://a.test" } })
-  expect(two.frames.at(-1)).toMatchObject({ type: "tab.activeInfo", tab: { tabId: b.tabs[0]!.id, url: "https://b.test" } })
+  expect(one.frames.findLast((frame) => frame.type === "tab.activeInfo")).toMatchObject({ type: "tab.activeInfo", tab: { tabId: a.tabs[0]!.id, url: "https://a.test" } })
+  expect(two.frames.findLast((frame) => frame.type === "tab.activeInfo")).toMatchObject({ type: "tab.activeInfo", tab: { tabId: b.tabs[0]!.id, url: "https://b.test" } })
   await stub.chrome.tabs.update(a.tabs[0]!.id, { url: "https://a.test/new" })
   events.tabs.onUpdated.emit(a.tabs[0]!.id, { url: "https://a.test/new" }, await stub.chrome.tabs.get(a.tabs[0]!.id))
   await settled()
-  expect(one.frames.at(-1)).toMatchObject({ type: "tab.activeInfo", tab: { url: "https://a.test/new" } })
-  expect(two.frames.at(-1)).toMatchObject({ type: "tab.activeInfo", tab: { url: "https://b.test" } })
+  expect(one.frames.findLast((frame) => frame.type === "tab.activeInfo")).toMatchObject({ type: "tab.activeInfo", tab: { url: "https://a.test/new" } })
+  expect(two.frames.findLast((frame) => frame.type === "tab.activeInfo")).toMatchObject({ type: "tab.activeInfo", tab: { url: "https://b.test" } })
 })
 test("重复 @当前页 请求只挂载一次，确认后才返回附带上下文的 tab", async () => {
   const w = await stub.chrome.windows.create({ url: "https://attach.test" })
@@ -111,4 +113,90 @@ test("图标缺省打开侧栏，改为借出模式后才切换当前页", async
   await settled()
   expect(attachCalls.at(-1)).toBe(tab.id)
   await stub.chrome.storage.local.set({ [TOOLBAR_MODE_KEY]: "sidepanel" })
+})
+
+test("引用与 @当前页 并发共用串行接入，重复引用不会切回未接入状态", async () => {
+  const w = await stub.chrome.windows.create({ url: "https://references.test" })
+  const tab = w.tabs[0]!, page = connect(), responses: unknown[] = []
+  page.send({ type: "sidepanel.ready", windowId: w.id, available: true })
+  page.send({ type: "tab.ensureAttached", tabId: tab.id, requestId: "reference-attach" })
+  for (let i = 0; i < 2; i++) events.runtime.onMessage.emit(
+    { type: "agent.reference", reference: { kind: "selection", selection: "引用内容" } },
+    { id: "stubextensionid", tab }, (value: unknown) => responses.push(value),
+  )
+  expect(page.frames.some((frame) => frame.type === "reference.request")).toBe(false)
+  await settled()
+  expect(attachCalls.filter((id) => id === tab.id)).toHaveLength(1)
+  expect(state.tabs.some((item) => item.tabId === tab.id)).toBe(true)
+  const requests = page.frames.filter((frame) => frame.type === "reference.request")
+  expect(requests).toHaveLength(2)
+  expect(responses).toEqual([])
+  for (const frame of requests) if (frame.type === "reference.request") page.send({ type: "reference.result", requestId: frame.requestId, ok: true })
+  await settled()
+  expect(responses).toEqual([{ ok: true }, { ok: true }])
+  page.port.onDisconnect.emit()
+})
+
+test("手动取回与引用接入按顺序执行，引用前恢复接入", async () => {
+  const w = await stub.chrome.windows.create({ url: "https://take-back-reference.test" })
+  const tab = w.tabs[0]!, page = connect(), responses: unknown[] = []
+  page.send({ type: "sidepanel.ready", windowId: w.id, available: true })
+  page.send({ type: "tab.ensureAttached", tabId: tab.id, requestId: "initial" })
+  await settled()
+  page.send({ type: "tab.toggleAttach", tabId: tab.id, requestId: "take-back-before-reference" })
+  events.runtime.onMessage.emit(
+    { type: "agent.reference", reference: { kind: "page" } },
+    { id: "stubextensionid", tab }, (value: unknown) => responses.push(value),
+  )
+  await settled()
+  expect(attachCalls.filter((id) => id === tab.id)).toHaveLength(3)
+  expect(state.tabs.some((item) => item.tabId === tab.id)).toBe(true)
+  const request = page.frames.find((frame) => frame.type === "reference.request")
+  if (request?.type !== "reference.request") throw new Error("重新接入后没有发送引用")
+  page.send({ type: "reference.result", requestId: request.requestId, ok: true })
+  await settled()
+  expect(responses).toEqual([{ ok: true }])
+  page.port.onDisconnect.emit()
+})
+
+test("引用接入失败后不发送 chip，失败不阻塞同标签页后续重试", async () => {
+  const w = await stub.chrome.windows.create({ url: "https://failed-reference.test" })
+  const tab = w.tabs[0]!, page = connect(), responses: unknown[] = []
+  page.send({ type: "sidepanel.ready", windowId: w.id, available: true })
+  attachError = new Error("调试接入被拒绝")
+  try {
+    events.runtime.onMessage.emit(
+      { type: "agent.reference", reference: { kind: "page" } },
+      { id: "stubextensionid", tab }, (value: unknown) => responses.push(value),
+    )
+    await settled()
+    expect(responses).toEqual([{ ok: false, error: "调试接入被拒绝" }])
+    expect(page.frames.some((frame) => frame.type === "reference.request")).toBe(false)
+  } finally { attachError = undefined }
+  page.send({ type: "tab.ensureAttached", tabId: tab.id, requestId: "retry-after-failure" })
+  await settled()
+  expect(page.frames.find((frame) => frame.type === "tab.result" && frame.requestId === "retry-after-failure")).toMatchObject({ ok: true, tab: { attached: true } })
+  page.port.onDisconnect.emit()
+})
+
+test("Relay 离线时即使保留接入状态也不发送引用", async () => {
+  const w = await stub.chrome.windows.create({ url: "https://offline-reference.test" })
+  const tab = w.tabs[0]!, page = connect(), responses: unknown[] = []
+  state.tabs.push({ tabId: tab.id })
+  page.send({ type: "sidepanel.ready", windowId: w.id, available: true })
+  state.status = "offline"
+  const before = attachCalls.length
+  try {
+    events.runtime.onMessage.emit(
+      { type: "agent.reference", reference: { kind: "page" } },
+      { id: "stubextensionid", tab }, (value: unknown) => responses.push(value),
+    )
+    await settled()
+    expect(responses).toEqual([{ ok: false, error: expect.stringContaining("请先连接") }])
+    expect(attachCalls.length).toBe(before)
+    expect(page.frames.some((frame) => frame.type === "reference.request")).toBe(false)
+  } finally {
+    state.status = "connected"
+    page.port.onDisconnect.emit()
+  }
 })

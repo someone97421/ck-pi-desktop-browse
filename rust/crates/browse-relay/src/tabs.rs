@@ -104,12 +104,36 @@ fn target_info(result: &Value) -> Option<(String, String, String, String)> {
 impl Relay {
     /// Attaches the debugger (unless it already is), sets the tab up and publishes it.
     pub async fn setup_tab(self: &Arc<Self>, attach: Attach) -> anyhow::Result<i64> {
+        let _attaching = self.tab_attach.lock().await;
+        self.setup_tab_locked(attach).await
+    }
+
+    pub(crate) async fn setup_tab_locked(self: &Arc<Self>, attach: Attach) -> anyhow::Result<i64> {
         let tab = attach.tab;
-        let link = self.st().browser_tab(tab).map(|(link, _)| link).ok_or_else(|| anyhow!(crate::protocol::NOT_CONNECTED))?;
-        let limit = Some(attach.timeout);
+        {
+            let st = self.st();
+            if let Some(entry) = st.tabs.get(&tab) {
+                if entry.closing { bail!("Tab {tab} is closing"); }
+                if attach.state.is_none() || attach.expect_target.as_ref() == Some(&entry.target_id) {
+                    return Ok(tab);
+                }
+            }
+        }
         if !attach.already_attached {
             self.ext_tab(tab, "debugger.attach", json!({})).await?;
         }
+        let newly_attached = !attach.already_attached;
+        let result = self.initialize_tab(attach).await;
+        if result.is_err() && newly_attached && !self.st().tabs.contains_key(&tab) {
+            let _ = self.ext_tab(tab, "debugger.detach", json!({})).await;
+        }
+        result
+    }
+
+    async fn initialize_tab(self: &Arc<Self>, attach: Attach) -> anyhow::Result<i64> {
+        let tab = attach.tab;
+        let link = self.st().browser_tab(tab).map(|(link, _)| link).ok_or_else(|| anyhow!(crate::protocol::NOT_CONNECTED))?;
+        let limit = Some(attach.timeout);
         self.debugger(tab, None, "Page.enable", json!({}), limit).await?;
         if let Err(RpcError::Timeout(message)) = self.debugger(tab, None, "Emulation.setFocusEmulationEnabled", json!({ "enabled": false }), limit).await {
             bail!(message);
@@ -117,9 +141,6 @@ impl Relay {
         let info = self.debugger(tab, None, "Target.getTargetInfo", json!({}), limit).await?;
         let (target_id, _, url, title) = target_info(&info).context("Target.getTargetInfo did not return targetInfo")?;
         if attach.expect_target.as_ref().is_some_and(|expected| *expected != target_id) {
-            if !attach.already_attached {
-                self.ext_best_effort(tab, "debugger.detach", json!({}));
-            }
             bail!("Tab {tab} shows another page now");
         }
         let restored = if attach.restore { self.restored_owner(&link, &target_id, attach.reclaim_held) } else { None };
@@ -554,7 +575,7 @@ impl Relay {
         {
             let mut st = self.st();
             st.tombstones.retain(|_, key| key != &link.key && !key.is_empty());
-            st.reconnect_owners.retain(|_, known| known.browser != link.key);
+            st.reconnect_owners.retain(|target, known| known.browser != link.key || lost.iter().any(|(pending, _)| pending == target));
             // Registry tabs this browser didn't announce again are gone (the browser restarted since).
             if still_pending.is_empty() {
                 st.restorable.retain(|_, held| held.browser_key != link.key);
@@ -576,7 +597,10 @@ impl Relay {
                 attach.expect_target = Some(target.clone());
                 match relay.setup_tab(attach).await {
                     Ok(_) => rlog!("extension.reconnect.reattached", tabId = tab),
-                    Err(error) => rlog!("extension.reconnect.lost", tabId = tab, target = target, error = error.to_string()),
+                    Err(error) => {
+                        relay.st().reconnect_owners.remove(&target);
+                        rlog!("extension.reconnect.lost", tabId = tab, target = target, error = error.to_string());
+                    }
                 }
             });
         }

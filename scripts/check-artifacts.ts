@@ -24,7 +24,7 @@ const TEST_ONLY_MARKERS = [
   // The stress harness's hooks (vite.config.ts OPENCODE_BROWSER_TEST_HOOKS).
   "__opencodeBrowserTest",
 ]
-const STORE_FILE_TYPES = /\.(js|css|html|json|png|svg)$/
+const STORE_FILE_TYPES = /\.(js|css|html|json|png|svg|txt)$/
 
 type Allowlist = Record<"permissions" | "optional_permissions" | "host_permissions" | "optional_host_permissions" | "content_scripts" | "web_accessible_resources", unknown[]> & {
   externally_connectable: unknown
@@ -347,13 +347,13 @@ export async function checkBinaryTarball(tarball: string, version: string, targe
 }
 
 if (import.meta.main) {
-  const { values } = parseArgs({ options: { version: { type: "string" }, zip: { type: "string" }, tarball: { type: "string" }, "platform-tarball": { type: "string" } } })
+  const { values } = parseArgs({ options: { version: { type: "string" }, zip: { type: "string" }, unpacked: { type: "boolean", default: false }, tarball: { type: "string" }, "platform-tarball": { type: "string" } } })
   if (!values.version || (!values.zip && !values.tarball)) {
-    console.error("usage: bun scripts/check-artifacts.ts --version <version> [--zip <file>] [--tarball <file> [--platform-tarball <file>]]")
+    console.error("usage: bun scripts/check-artifacts.ts --version <version> [--zip <file> [--unpacked]] [--tarball <file> [--platform-tarball <file>]]")
     process.exit(2)
   }
   const problems = [
-    ...(values.zip ? await checkStoreZip(values.zip, values.version, undefined, values.version.includes("-dev.")) : []),
+    ...(values.zip ? await checkStoreZip(values.zip, values.version, undefined, values.unpacked || values.version.includes("-dev.")) : []),
     ...(values.tarball ? await checkPackageTarball(values.tarball, values.version) : []),
     ...(values.tarball && values["platform-tarball"] ? await checkPackageInstall(values.tarball, values.version, values["platform-tarball"]) : []),
   ]

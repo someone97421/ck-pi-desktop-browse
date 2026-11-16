@@ -114,6 +114,10 @@ impl Seen {
 
 /// Answers the relay's commands like the extension, records them, and sends whatever is pushed to `events`.
 fn fake_extension(socket: Socket, next_tab: i64) -> (Arc<Seen>, mpsc::UnboundedSender<Value>) {
+    fake_extension_with_tabs(socket, next_tab, Vec::new())
+}
+
+fn fake_extension_with_tabs(socket: Socket, next_tab: i64, tabs: Vec<Value>) -> (Arc<Seen>, mpsc::UnboundedSender<Value>) {
     let seen = Arc::new(Seen::default());
     let (events, mut outgoing) = mpsc::unbounded_channel::<Value>();
     let (mut sink, mut stream) = socket.split();
@@ -139,12 +143,25 @@ fn fake_extension(socket: Socket, next_tab: i64) -> (Arc<Seen>, mpsc::UnboundedS
             let Some(id) = command["id"].as_u64() else { continue };
             let params = &command["params"];
             let result = match command["method"].as_str().unwrap_or("") {
+                "tabs.query" if tabs.first().is_some_and(|tab| tab["queryError"] == true) => {
+                    let _ = replies.send(json!({ "id": id, "error": "Unknown method tabs.query" }));
+                    continue;
+                }
+                "tabs.query" => json!({ "tabs": tabs }),
+                "debugger.attach" if params["tabId"] == 999 => {
+                    let _ = replies.send(json!({ "id": id, "error": "Cannot attach to this target." }));
+                    continue;
+                }
                 "tabs.create" => {
                     let created = record.0.lock().unwrap().iter().filter(|c| c["method"] == "tabs.create").count() as i64;
                     json!({ "tabId": next_tab + created - 1 })
                 }
                 "settings.get" | "settings.set" => json!({ "settings": { "window": "current", "grouping": "shared", "idleMinutes": 10, "humanInput": "on", "handoffNotifications": "recording" } }),
                 "debugger.sendCommand" => match params["method"].as_str().unwrap_or("") {
+                    "Page.enable" if params["tabId"] == 998 => {
+                        let _ = replies.send(json!({ "id": id, "error": "Page initialization failed" }));
+                        continue;
+                    }
                     "Target.getTargetInfo" => {
                         let tab = params["tabId"].as_i64().unwrap();
                         json!({ "targetInfo": { "targetId": format!("T{tab}"), "type": "page", "url": "about:blank", "title": "", "attached": true } })
@@ -682,7 +699,7 @@ async fn closed_tabs_say_why_and_leave_the_registry() {
     let error = browser.cdp(second).await.err().unwrap().to_string();
     assert!(error.contains(&format!("Tab {second} is gone")) && error.contains("closed with the tabs tool") && error.contains("navigate"), "{error}");
     let unknown = browser.cdp(4242).await.err().unwrap().to_string();
-    assert!(unknown.contains("isn't a browse tab"), "{unknown}");
+    assert!(unknown.contains("was not found in the connected browsers"), "{unknown}");
     relay.persist_now();
     let registry: Value = serde_json::from_str(&std::fs::read_to_string(h.paths.tab_registry(0)).unwrap()).unwrap();
     assert_eq!(registry["tabs"], json!([{ "tab": first, "targetId": format!("T{first}"), "browserKey": "profile-close", "group": "work", "createdAt": registry["tabs"][0]["createdAt"] }]));
@@ -995,4 +1012,161 @@ async fn a_call_naming_a_tab_waits_for_the_reconnecting_browser() {
     events.send(json!({ "method": "debugger.attached", "params": { "tabId": 41, "agent": true } })).unwrap();
     events.send(json!({ "method": "ready" })).unwrap();
     tokio::time::timeout(Duration::from_secs(10), call).await.unwrap().unwrap().expect("the tab came back with the inventory");
+}
+
+#[tokio::test]
+async fn existing_tabs_are_discovered_without_lending_or_attaching() {
+    let h = harness().await;
+    let socket = pair_with_token(h.handle.port(), &h.paths, "profile-existing").await;
+    let (seen, events) = fake_extension_with_tabs(socket, 7, vec![json!({ "tabId": 835, "title": "bilibili", "url": "https://www.bilibili.com/zh-Hans", "windowId": 581 })]);
+    events.send(json!({ "method": "ready" })).unwrap();
+    eventually("the browser to connect", || h.handle.relay.st().connected()).await;
+    let tabs = h.handle.browser().tabs().await.unwrap();
+    assert_eq!(tabs.len(), 1);
+    assert_eq!(tabs[0].tab, 835);
+    assert_eq!(tabs[0].title, "bilibili");
+    assert_eq!(tabs[0].url, "https://www.bilibili.com/zh-Hans");
+    assert_eq!(tabs[0].options.browser.as_deref(), Some("test-chrome"));
+    assert!(tabs[0].lent);
+    assert!(seen.commands("debugger.attach").is_empty());
+    assert!(h.handle.relay.tab_infos().is_empty());
+}
+
+#[tokio::test]
+async fn existing_tabs_attach_once_on_direct_concurrent_access_and_release_without_closing() {
+    let h = harness().await;
+    let socket = pair_with_token(h.handle.port(), &h.paths, "profile-direct").await;
+    let (seen, events) = fake_extension_with_tabs(socket, 7, vec![json!({ "tabId": 835, "url": "https://www.bilibili.com/zh-Hans", "title": "bilibili" })]);
+    events.send(json!({ "method": "ready" })).unwrap();
+    eventually("the browser to connect", || h.handle.relay.st().connected()).await;
+    let browser = h.handle.browser();
+    let (first, second, state) = tokio::join!(browser.cdp(835), browser.cdp(835), browser.state(835));
+    assert!(Arc::ptr_eq(&first.unwrap(), &second.unwrap()));
+    assert!(state.is_ok());
+    assert_eq!(seen.commands("debugger.attach").len(), 1);
+    assert!(h.handle.relay.tab_infos()[0].lent);
+    browser.close_tab(835).await.unwrap();
+    assert_eq!(seen.commands("debugger.detach").len(), 1);
+    assert!(seen.commands("tabs.remove").is_empty());
+}
+
+#[tokio::test]
+async fn existing_tabs_keep_distinct_browser_ids_and_route_to_the_right_profile() {
+    let h = harness().await;
+    let first = pair_with_token(h.handle.port(), &h.paths, "profile-first").await;
+    let (seen_first, events_first) = fake_extension_with_tabs(first, 7, vec![json!({ "tabId": 835, "url": "https://first.test/" })]);
+    events_first.send(json!({ "method": "ready" })).unwrap();
+    eventually("the first browser to connect", || h.handle.relay.st().connected()).await;
+    let second = pair_with_token(h.handle.port(), &h.paths, "profile-second").await;
+    let (seen_second, events_second) = fake_extension_with_tabs(second, 7, vec![json!({ "tabId": 835, "url": "https://second.test/" })]);
+    events_second.send(json!({ "method": "ready" })).unwrap();
+    eventually("both browsers to connect", || h.handle.relay.st().links.iter().filter(|link| link.connected()).count() == 2).await;
+    let browser = h.handle.browser();
+    let tabs = browser.tabs().await.unwrap();
+    assert_eq!(tabs.len(), 2);
+    assert_ne!(tabs[0].tab, tabs[1].tab);
+    let tab = tabs.iter().find(|tab| tab.url == "https://second.test/").unwrap();
+    browser.cdp(tab.tab).await.unwrap();
+    assert!(seen_first.commands("debugger.attach").is_empty());
+    assert_eq!(seen_second.commands("debugger.attach")[0]["params"]["tabId"], 835);
+}
+
+#[tokio::test]
+async fn existing_tabs_report_attach_failure_without_registering_a_phantom_tab() {
+    let h = harness().await;
+    let socket = pair_with_token(h.handle.port(), &h.paths, "profile-attach-error").await;
+    let (seen, events) = fake_extension_with_tabs(socket, 7, vec![json!({ "tabId": 999, "url": "chrome://settings/" })]);
+    events.send(json!({ "method": "ready" })).unwrap();
+    eventually("the browser to connect", || h.handle.relay.st().connected()).await;
+    let error = h.handle.browser().cdp(999).await.err().unwrap().to_string();
+    assert!(error.contains("Cannot attach to this target"), "{error}");
+    assert_eq!(seen.commands("debugger.attach").len(), 1);
+    assert!(h.handle.relay.tab_infos().is_empty());
+}
+
+#[tokio::test]
+async fn existing_tabs_reacquire_the_same_state_used_by_subsequent_calls() {
+    let h = harness().await;
+    let socket = pair_with_token(h.handle.port(), &h.paths, "profile-state").await;
+    let (_, events) = fake_extension_with_tabs(socket, 7, vec![json!({ "tabId": 835, "url": "https://example.com/" })]);
+    events.send(json!({ "method": "ready" })).unwrap();
+    eventually("the browser to connect", || h.handle.relay.st().connected()).await;
+    let browser = h.handle.browser();
+    let previous = browser.state(835).await.unwrap();
+    browser.close_tab(835).await.unwrap();
+    let current = browser.state(835).await.unwrap();
+    browser.cdp(835).await.unwrap();
+    assert!(!Arc::ptr_eq(&previous, &current));
+    assert!(Arc::ptr_eq(&current, &browser.state(835).await.unwrap()));
+    assert!(Arc::ptr_eq(&current, &h.handle.relay.st().tabs[&835].state));
+}
+
+#[tokio::test]
+async fn existing_tabs_detach_after_initialization_failure_and_can_retry() {
+    let h = harness().await;
+    let socket = pair_with_token(h.handle.port(), &h.paths, "profile-initialize-error").await;
+    let (seen, events) = fake_extension_with_tabs(socket, 7, vec![json!({ "tabId": 998, "url": "https://example.com/" })]);
+    events.send(json!({ "method": "ready" })).unwrap();
+    eventually("the browser to connect", || h.handle.relay.st().connected()).await;
+    let browser = h.handle.browser();
+    for _ in 0..2 {
+        let error = browser.cdp(998).await.err().unwrap().to_string();
+        assert!(error.contains("Page initialization failed"), "{error}");
+    }
+    assert_eq!(seen.commands("debugger.attach").len(), 2);
+    assert_eq!(seen.commands("debugger.detach").len(), 2);
+    assert!(h.handle.relay.tab_infos().is_empty());
+}
+
+#[tokio::test]
+async fn existing_tabs_keep_attached_tabs_visible_when_an_old_extension_cannot_query() {
+    let h = harness().await;
+    let socket = pair_with_token(h.handle.port(), &h.paths, "profile-query-error").await;
+    let (_, events) = fake_extension_with_tabs(socket, 7, vec![json!({ "queryError": true })]);
+    events.send(json!({ "method": "ready" })).unwrap();
+    eventually("the browser to connect", || h.handle.relay.st().connected()).await;
+    let browser = h.handle.browser();
+    let opened = browser.open_tab(None, &grouped("work")).await.unwrap();
+    let tabs = browser.tabs().await.unwrap();
+    assert_eq!(tabs.len(), 1);
+    assert_eq!(tabs[0].tab, opened.tab);
+    assert_eq!(tabs[0].options.group.as_deref(), Some("work"));
+    assert!(!tabs[0].lent);
+}
+
+#[tokio::test]
+async fn existing_tabs_do_not_override_reconnecting_agent_ownership() {
+    let h = harness().await;
+    let socket = pair_with_token(h.handle.port(), &h.paths, "profile-restore-owner").await;
+    let (seen, events) = fake_extension_with_tabs(socket, 835, vec![json!({ "tabId": 835, "url": "about:blank" })]);
+    events.send(json!({ "method": "ready" })).unwrap();
+    eventually("the browser to connect", || h.handle.relay.st().connected()).await;
+    let browser = h.handle.browser();
+    let options = TabOptions { read_only: true, allowed_origins: Some(vec!["https://example.com".into()]), ..grouped("work") };
+    let opened = browser.open_tab(None, &options).await.unwrap();
+    let relay = h.handle.relay.clone();
+    let (target, known) = {
+        let st = relay.st();
+        let entry = &st.tabs[&opened.tab];
+        (entry.target_id.clone(), crate::relay::KnownOwner {
+            tab: entry.id, owner: entry.owner, browser: entry.link_key.clone(), options: entry.options.clone(),
+            opener: entry.opener, state: entry.state.clone(), created_at: entry.created_at.clone(),
+        })
+    };
+    relay.st().reconnect_owners.insert(target.clone(), known.clone());
+    relay.remove_tab(opened.tab, crate::tabs::Release::default(), "extension-disconnected");
+    let mut restoring = crate::tabs::Attach::new(opened.tab, known.owner);
+    restoring.options = known.options;
+    restoring.state = Some(known.state.clone());
+    restoring.expect_target = Some(target);
+    let (direct, restored) = tokio::join!(browser.cdp(opened.tab), relay.setup_tab(restoring));
+    assert!(direct.is_ok());
+    assert!(restored.is_ok());
+    let info = relay.tab_infos().pop().unwrap();
+    assert!(!info.lent);
+    assert!(info.options.read_only);
+    assert_eq!(info.options.allowed_origins, options.allowed_origins);
+    assert_eq!(info.options.group.as_deref(), Some("work"));
+    assert!(Arc::ptr_eq(&known.state, &browser.state(opened.tab).await.unwrap()));
+    assert_eq!(seen.commands("debugger.attach").len(), 2);
 }

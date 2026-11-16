@@ -53,7 +53,7 @@ impl Tool for TabsTool {
             "list" => {
                 refresh_titles(&relay).await;
                 let group = string(&args, "group");
-                let tabs: Vec<_> = relay.tab_infos().into_iter().filter(|t| group.is_none() || t.options.group == group).collect();
+                let tabs: Vec<_> = relay.discover_tabs().await?.into_iter().filter(|t| group.is_none() || t.options.group == group).collect();
                 Ok(json_output(json!({ "tabs": tabs })))
             }
             "new" => {
@@ -142,8 +142,7 @@ async fn close_tabs(relay: &Arc<Relay>, args: &Value) -> anyhow::Result<ToolOutp
     }
     let (mut closed, mut released, mut failed) = (forgotten, Vec::new(), Vec::new());
     for tab in picked {
-        relay.await_tab(tab).await;
-        if let Err(error) = relay.usable_tab(tab) {
+        if let Err(error) = relay.ensure_tab(tab).await {
             failed.push(json!({ "tab": tab, "error": error.to_string() }));
             continue;
         }
@@ -190,8 +189,7 @@ fn handoff_schema(message: &str) -> Value {
 /// The tab a handoff or demonstration runs in, checked and noted as the call's.
 async fn handoff_tab(relay: &Arc<Relay>, args: &Value) -> anyhow::Result<i64> {
     let tab = browse_core::require_tab(args)?;
-    relay.await_tab(tab).await;
-    relay.usable_tab(tab)?;
+    relay.ensure_tab(tab).await?;
     relay.note_call_tab(tab);
     Ok(tab)
 }

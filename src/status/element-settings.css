@@ -99,87 +99,6 @@
   opacity: 0.55;
 }
 
-.element-settings-shortcut {
-  min-width: 0;
-  margin: 0;
-  padding: 0;
-  border: 0;
-}
-
-.element-settings-label {
-  padding: 0;
-  margin-bottom: 10px;
-  color: var(--element-settings-muted);
-  font-size: 12px;
-}
-
-.element-settings-keys {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-}
-
-.element-settings-key {
-  box-sizing: border-box;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 9px;
-  min-width: 86px;
-  padding: 9px 13px;
-  border: 1px solid var(--element-settings-line);
-  border-radius: 8px;
-  background: var(--element-settings-key);
-  box-shadow: 0 2px 0 var(--element-settings-line);
-  cursor: pointer;
-}
-
-.element-settings-key[data-checked="true"] {
-  border-color: var(--element-settings-accent);
-  background: var(--element-settings-accent-soft);
-  color: var(--element-settings-accent);
-}
-
-.element-settings-key:focus-within {
-  outline: 2px solid var(--element-settings-accent);
-  outline-offset: 3px;
-}
-
-.element-settings-key-input {
-  width: 13px;
-  height: 13px;
-  margin: 0;
-  accent-color: var(--element-settings-accent);
-  cursor: inherit;
-}
-
-.element-settings-keycap {
-  color: inherit;
-  font: 600 12px/1.5 ui-monospace, SFMono-Regular, Consolas, monospace;
-}
-
-.element-settings-shortcut:disabled .element-settings-key {
-  cursor: default;
-  opacity: 0.55;
-}
-
-.element-settings-current {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 8px 14px;
-}
-
-.element-settings-current-label {
-  color: var(--element-settings-muted);
-  font-size: 12px;
-}
-
-.element-settings-combination {
-  color: var(--element-settings-accent);
-  font-size: 12px;
-  font-weight: 600;
-}
 
 .element-settings-hint {
   min-height: 18px;
@@ -220,7 +139,6 @@
 
 @media (max-width: 480px) {
   .element-settings { padding: 18px; }
-  .element-settings-key { min-width: 75px; padding-inline: 10px; }
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -3,7 +3,7 @@
   "name": "这是一个助手 · 浏览器",
   "short_name": "这是一个助手",
   "description": "连接这是一个助手，在侧边栏对话，引用浏览器标签页、选中文字和网页元素，并让 Agent 使用当前浏览器。",
-  "version": "0.0.17",
+  "version": "0.0.18",
   "minimum_chrome_version": "125",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAjWdgsBDUPCHO2u5bq3/Us1sLm+kiehLZBL0HIu3stwivGW+bgCDsD8KAEMFJcY04u3iudffTeEGdEe8pQfL7BSNRvyslszmvJrsoP7bVUKXrnRTw3CUsRjnwbqMoMElwegiCFUXPnqQ9ZeA2NGEhmWMyDXqqZxOo0z2q66GTgz9McbXOBK2QXYBPjUWxud814wSrE1lIQ2G58nQVeZenI3/PXZ4f1SACn6SdkiCR44NZwz89I1ISxftongLDED/1dlnivqJBzAtN1s2i+jWplLtOmLJJkh1LQ2jP3gWvYY1zT2RHJIw874SSrrhFt4Hguvo/L0Ge7ixvGp5tDAP2wwIDAQAB",
   "icons": {
@@ -42,13 +42,19 @@
     "sidePanel",
     "contextMenus"
   ],
-  "content_scripts": [{
-    "matches": ["<all_urls>"],
-    "js": ["element-picker.js"],
-    "all_frames": true,
-    "match_about_blank": true,
-    "run_at": "document_idle"
-  }],
+  "content_scripts": [
+    {
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "element-picker.js"
+      ],
+      "all_frames": true,
+      "match_about_blank": true,
+      "run_at": "document_idle"
+    }
+  ],
   "host_permissions": [
     "<all_urls>"
   ]

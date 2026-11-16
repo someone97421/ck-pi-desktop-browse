@@ -1,5 +1,6 @@
 import type { BrowserElementInfo, BrowserReference } from "../shared/browser-reference"
 import type { FromSidepanel, ToSidepanel } from "../shared/protocol"
+import { ELEMENT_PICKER_ENABLED_KEY, elementPickerEnabled } from "../shared/element-settings"
 
 const MENU_ID = "send-to-agent"
 const REQUEST_TIMEOUT = 70_000
@@ -61,10 +62,47 @@ export function contentReference(value: unknown, tab: chrome.tabs.Tab, sender: c
   return reference
 }
 
-export function createBrowserReferences() {
+export function createBrowserReferences(ensureAttached: (tabId: number) => Promise<void>) {
   const panels = new Map<chrome.runtime.Port, Panel>()
   const pending = new Map<string, Pending>()
   const pickerAvailability = new Map<number, boolean>()
+  type Pick = { id: string; tabId: number; port: chrome.runtime.Port; timer?: ReturnType<typeof setTimeout>; ending?: boolean }
+  const picks = new Map<string, Pick>()
+
+  function stopPick(pick: Pick) {
+    clearTimeout(pick.timer)
+    picks.delete(pick.id)
+    void chrome.tabs.sendMessage(pick.tabId, { type: "browser.pickerStop", sessionId: pick.id }).catch(() => undefined)
+  }
+  function cancelPicks(matches: (pick: Pick) => boolean) {
+    for (const pick of picks.values()) if (matches(pick)) stopPick(pick)
+  }
+  async function startPick(port: chrome.runtime.Port, id: string, tabId: number) {
+    cancelPicks((pick) => pick.port === port || pick.tabId === tabId)
+    const pick: Pick = { id, tabId, port }
+    picks.set(id, pick)
+    pick.timer = setTimeout(() => stopPick(pick), 120_000)
+    try {
+      const panel = panels.get(port)
+      if (!panel?.available || !panel.open) throw new Error("请先登录侧栏并等待连接就绪")
+      const [tab, stored] = await Promise.all([chrome.tabs.get(tabId), chrome.storage.local.get(ELEMENT_PICKER_ENABLED_KEY)])
+      if (!elementPickerEnabled(stored[ELEMENT_PICKER_ENABLED_KEY])) throw new Error("网页元素拾取已关闭，请到扩展设置中启用")
+      if (!tab.active || tab.windowId !== panel.windowId) throw new Error("当前标签页已变化，请重新拖动抓手")
+      if (!/^(https?|file):/.test(tab.url || "")) throw new Error("此 Chrome 页面不支持 DOM 捕捉，请切换到普通网页")
+      if (picks.get(id) !== pick || pick.ending) return
+      await chrome.scripting.executeScript({ target: { tabId, allFrames: true }, files: ["element-picker.js"] })
+      if (picks.get(id) !== pick || pick.ending) return
+      await chrome.tabs.sendMessage(tabId, { type: "browser.pickerStart", sessionId: id })
+      // 注入和消息期间可能发生取消；补发停止，避免残留高亮。
+      if (picks.get(id) !== pick || pick.ending) {
+        void chrome.tabs.sendMessage(tabId, { type: "browser.pickerStop", sessionId: id }).catch(() => undefined)
+      }
+    } catch (error) {
+      if (picks.get(id) !== pick) return
+      stopPick(pick)
+      post(port, { type: "picker.result", sessionId: id, ok: false, error: error instanceof Error ? `无法捕捉当前网页：${error.message}` : "此网页不允许注入 DOM 捕捉脚本" })
+    }
+  }
   let refreshing = false
   let refreshNeeded = false
   let browserId = ""
@@ -109,6 +147,7 @@ export function createBrowserReferences() {
 
   function removePanel(port: chrome.runtime.Port) {
     if (!panels.delete(port)) return
+    cancelPicks((pick) => pick.port === port)
     failPending(port, "所属窗口的侧栏已断开，请重新打开并登录")
     refresh()
   }
@@ -162,10 +201,23 @@ export function createBrowserReferences() {
         if (!Number.isInteger(message.windowId) || message.windowId < 0 || typeof message.available !== "boolean") return
         if (panel.windowId === message.windowId && panel.available === message.available) return
         if (panel.windowId !== message.windowId || !message.available) failPending(port, "所属窗口的侧栏尚未登录或已离线")
+        if (panel.windowId !== message.windowId || !message.available) cancelPicks((pick) => pick.port === port)
         panel.windowId = message.windowId
         panel.available = message.available
         if (!panel.available || !panel.open) clearPanelTabs(port)
         refresh()
+      } else if (message.type === "picker.start" && typeof message.sessionId === "string" && /^[a-z0-9-]{1,80}$/.test(message.sessionId) && Number.isInteger(message.tabId)) {
+        void startPick(port, message.sessionId, message.tabId)
+      } else if (message.type === "picker.end") {
+        const pick = picks.get(message.sessionId)
+        if (!pick || pick.port !== port) return
+        if (message.cancel) stopPick(pick)
+        else {
+          // drop 与源 document 的 dragend 分属不同进程，保留短暂认领窗口。
+          pick.ending = true
+          clearTimeout(pick.timer)
+          pick.timer = setTimeout(() => stopPick(pick), 250)
+        }
       } else if (message.type === "reference.result" && typeof message.requestId === "string") {
         const item = pending.get(message.requestId)
         if (!item || item.port !== port) return
@@ -178,12 +230,16 @@ export function createBrowserReferences() {
     refresh()
   }
 
-  async function deliver(reference: BrowserReference) {
+  async function deliver(reference: BrowserReference, expectedPort?: chrome.runtime.Port) {
     if (reference.windowId === undefined) throw new Error("无法确定来源窗口，请在原窗口重试")
     const targets = deliveryCandidates(reference.windowId)
     if (!targets.length) throw new Error("请先打开 Agent 侧栏，登录并等待连接就绪")
     if (targets.length !== 1) throw new Error("有多个可用侧栏，无法确定接收位置，请在来源窗口打开侧栏后重试")
     const port = targets[0]![0]
+    if (expectedPort && expectedPort !== port) throw new Error("接收侧栏已变化，请重新拖动抓手")
+    await ensureAttached(reference.tabId)
+    const confirmed = deliveryCandidates(reference.windowId)
+    if (confirmed.length !== 1 || confirmed[0]![0] !== port) throw new Error("接收侧栏已变化，请重新发送网页引用")
     await new Promise<void>((resolve, reject) => {
       const requestId = crypto.randomUUID()
       const timer = setTimeout(() => {
@@ -197,17 +253,35 @@ export function createBrowserReferences() {
 
   function runtimeMessage(message: unknown, sender: chrome.runtime.MessageSender, sendResponse: (value: unknown) => void): true | undefined {
     if (!message || typeof message !== "object" || !("type" in message)
-      || (message.type !== "agent.pickerAvailability" && message.type !== "agent.reference")) return
+      || !["agent.pickerAvailability", "agent.reference", "browser.elementPicked", "browser.pickerCancel"].includes(String(message.type))) return
     void (async () => {
       if (sender.id !== chrome.runtime.id || sender.tab?.id === undefined) throw new Error("无法确认引用来源标签页")
-      const tab = await chrome.tabs.get(sender.tab.id)
-      if (message.type === "agent.pickerAvailability") {
-        sendResponse({ available: deliveryCandidates(tab.windowId).length === 1 })
-        return
+      if (message.type === "browser.pickerCancel") {
+        const pick = "sessionId" in message && typeof message.sessionId === "string" ? picks.get(message.sessionId) : undefined
+        if (pick?.tabId === sender.tab.id) stopPick(pick)
+        sendResponse({ ok: true }); return
       }
-      const reference = contentReference("reference" in message ? message.reference : undefined, tab, sender)
-      await deliver(reference)
-      sendResponse({ ok: true })
+      const pick = message.type === "browser.elementPicked" && "sessionId" in message && typeof message.sessionId === "string" ? picks.get(message.sessionId) : undefined
+      if (message.type === "browser.elementPicked") {
+        if (!pick || pick.tabId !== sender.tab.id) throw new Error("此次 DOM 捕捉已取消或已处理，请重新拖动抓手")
+        // 在第一个 await 前认领，跨 frame 的重复请求不能重复投递。
+        stopPick(pick)
+      }
+      try {
+        const tab = await chrome.tabs.get(sender.tab.id)
+        if (message.type === "agent.pickerAvailability") {
+          sendResponse({ available: deliveryCandidates(tab.windowId).length === 1 })
+          return
+        }
+        const reference = contentReference("reference" in message ? message.reference : undefined, tab, sender)
+        if (pick && reference.kind !== "element") throw new Error("DOM 捕捉内容无效")
+        await deliver(reference, pick?.port)
+        if (pick) post(pick.port, { type: "picker.result", sessionId: pick.id, ok: true })
+        sendResponse({ ok: true })
+      } catch (error) {
+        if (pick) post(pick.port, { type: "picker.result", sessionId: pick.id, ok: false, error: error instanceof Error ? error.message : "元素引用发送失败" })
+        throw error
+      }
     })().catch((error: unknown) => {
       const text = error instanceof Error ? error.message : "网页引用发送失败"
       sendResponse(message.type === "agent.pickerAvailability" ? { available: false } : { ok: false, error: text })
@@ -250,6 +324,17 @@ export function createBrowserReferences() {
   chrome.tabs.onAttached.addListener(refresh)
   chrome.tabs.onDetached.addListener(refresh)
   chrome.tabs.onReplaced.addListener((_, removedTabId) => { pickerAvailability.delete(removedTabId); refresh() })
+  chrome.tabs.onActivated.addListener((info) => cancelPicks((pick) => pick.tabId !== info.tabId && panels.get(pick.port)?.windowId === info.windowId))
+  chrome.tabs.onUpdated.addListener((tabId, change) => {
+    if (change?.status === "loading" || change?.url) cancelPicks((pick) => pick.tabId === tabId)
+  })
+  chrome.tabs.onRemoved.addListener((tabId) => cancelPicks((pick) => pick.tabId === tabId))
+  chrome.tabs.onDetached.addListener((tabId) => cancelPicks((pick) => pick.tabId === tabId))
+  chrome.tabs.onReplaced.addListener((_, tabId) => cancelPicks((pick) => pick.tabId === tabId))
+  chrome.windows.onFocusChanged.addListener((windowId) => cancelPicks((pick) => panels.get(pick.port)?.windowId !== windowId))
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area === "local" && ELEMENT_PICKER_ENABLED_KEY in changes && !elementPickerEnabled(changes[ELEMENT_PICKER_ENABLED_KEY]?.newValue)) cancelPicks(() => true)
+  })
 
   type PanelEvent = { windowId: number }
   const panelEvents = chrome.sidePanel as typeof chrome.sidePanel & {
@@ -261,6 +346,7 @@ export function createBrowserReferences() {
       if (panel.windowId !== windowId) continue
       panel.open = open
       if (!open) {
+        cancelPicks((pick) => pick.port === port)
         failPending(port, "所属窗口的侧栏已关闭，请重新打开")
         clearPanelTabs(port)
       }
