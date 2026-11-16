@@ -86,7 +86,7 @@ describe("cliUpdateNotice", () => {
   test("uses the relay's command for a binary install and names the version plainly", () => {
     const notice = cliUpdateNotice({ ...base, cli: "/opt/browse/bin/browse", mode: "notify", effective: "notify" }, NOW)!
     expect(notice.command).toBe("/opt/browse/bin/browse update")
-    expect(cliUpdateText(notice)).toBe("browse 0.0.16 is out of date (0.0.17 is out). Run `/opt/browse/bin/browse update`.")
+    expect(cliUpdateText(notice)).toBe("Browse CLI 0.0.16 有可用更新 0.0.17。请手动运行 `/opt/browse/bin/browse update`。")
   })
 })
 

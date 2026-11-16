@@ -10,11 +10,11 @@ import { Icon } from "@opencode/ui/icon"
 import { IconButton } from "@opencode/ui/icon-button"
 import { Menu } from "@opencode/ui/menu"
 import { TextInput } from "@opencode/ui/text-input"
-import { unpackedExtensionId, unpackedReloadAdvice } from "../../cli/src/protocol"
+import { unpackedExtensionId } from "../../cli/src/protocol"
 import { relayPorts } from "../agent-relay/protocol"
 import { probeRelayPort, type RelayProbe } from "../agent-relay/probe"
 import { cliUpdateNotice } from "../shared/protocol"
-import { cliUpdateText } from "./describe"
+import { cliUpdateText, unpackedReloadText } from "./describe"
 import { firstRunStep, shouldProbe, type FirstRunStep } from "./first-run"
 import { pairingLink } from "./pairing-link"
 import { TRY_PROMPT, checklist } from "./checklist"
@@ -79,7 +79,7 @@ function Onboarding() {
           code: fragmentCode,
           ...(fragmentPort !== undefined ? { port: fragmentPort } : {}),
         })
-      else setLinkNote("Already paired with the relay; the pairing link from install was ignored.")
+      else setLinkNote("已与中继配对，已忽略安装链接中的配对码。")
       fragmentCode = undefined
     }
     if (shouldProbe(state)) void probeRelay()
@@ -87,7 +87,7 @@ function Onboarding() {
   relay.onMessage((message) => {
     if (message?.type !== "pairing.link.result") return
     if (message.ok) setPairedBy("link")
-    else setLinkNote("Already paired with the relay; the pairing link from install was ignored.")
+    else setLinkNote("已与中继配对，已忽略安装链接中的配对码。")
   })
 
   /**
@@ -126,14 +126,14 @@ function Onboarding() {
   const tryIt = (number: number) => (
     <Step
       number={number}
-      title="Try it"
+      title="试用一下"
       done={list().tryIt === "done"}
-      description={list().tryIt === "done" ? "Your agent opened a tab. browse works." : "Ask your agent something like:"}
+      description={list().tryIt === "done" ? "智能体已打开标签页，连接可用。" : "将以下示例发送给智能体："}
     >
       <Show when={list().tryIt !== "done"}>
-        <Command text={TRY_PROMPT} label="Copy prompt" />
+        <Command text={TRY_PROMPT} label="复制提示词" />
         <Show when={connected()}>
-          <Waiting>Watching for your agent's first tab…</Waiting>
+          <Waiting>正在等待智能体打开第一个标签页…</Waiting>
         </Show>
       </Show>
     </Step>
@@ -142,15 +142,15 @@ function Onboarding() {
   const installStep = (how: How) => (
     <Step
       number={1}
-      title={how === "agent" ? "Paste this into your agent" : method().title}
+      title={how === "agent" ? "发送给你的智能体" : method().title}
       done={connected()}
       description={
         connected() ? (
           <AgentDone relay={relay} pairedBy={pairedBy()} />
         ) : how === "agent" ? (
-          "OpenCode, Claude Code, Codex, Cursor or any agent that can run commands. It installs browse, adds it to itself and connects to this browser."
+          "支持 OpenCode、Claude Code、Codex、Cursor 等可执行命令的智能体。"
         ) : (
-          "Downloads browse, adds it to the agents it finds on this computer and connects to this browser."
+          "从个人源码安装 Browse CLI，配置本机智能体并连接此浏览器。"
         )
       }
     >
@@ -160,11 +160,11 @@ function Onboarding() {
           step={step()}
           command={
             how === "agent" ? (
-              <Command text={AGENT_PROMPT} label="Copy prompt" />
+              <Command text={AGENT_PROMPT} label="复制提示词" />
             ) : (
               <Command
                 text={method().command}
-                label="Copy command"
+                label="复制命令"
                 picker={<MethodMenu methods={installMethods} value={method()} onChange={(option) => setPickedMethod(option.id)} />}
               />
             )
@@ -183,19 +183,19 @@ function Onboarding() {
       <section class="guide" aria-labelledby="guide-title">
         <header class="guide-head">
           <h1 id="guide-title" class="guide-title">
-            {remote() ? "Connect an agent on another computer" : "Connect your agent"}
+            {remote() ? "连接其他计算机上的智能体" : "连接你的智能体"}
             <Show when={connected()}>
               <span class="guide-connected">
                 <span aria-hidden="true">·</span>
-                <span class="ok">Connected</span>
+                <span class="ok">已连接</span>
               </span>
             </Show>
           </h1>
-          <p class="guide-sub">
-            <Show when={remote()} fallback="This page checks each step as it happens.">
-              For an agent on a server, a dev box or another laptop.{" "}
+          <p class="guide-sub hint">
+            <Show when={remote()} fallback="连接进度会自动更新。">
+              适用于服务器或其他计算机。{" "}
               <button type="button" class="link" onClick={() => setWhere("here")}>
-                Agent on this computer?
+                改为连接本机
               </button>
             </Show>
           </p>
@@ -215,12 +215,12 @@ function Onboarding() {
           when={remote()}
           fallback={
             <Tabs value={how()} onChange={(value) => setHow(value as How)}>
-              <Tabs.List class="tabs" aria-label="How to set it up">
+              <Tabs.List class="tabs" aria-label="安装方式">
                 <Tabs.Trigger class="tab" value="agent">
-                  <span>Ask your agent</span>
+                  <span>让智能体配置</span>
                 </Tabs.Trigger>
                 <Tabs.Trigger class="tab" value="manual">
-                  <span>Do it yourself</span>
+                  <span>手动配置</span>
                 </Tabs.Trigger>
                 <Tabs.Indicator class="tab-indicator" />
               </Tabs.List>
@@ -245,14 +245,14 @@ function Onboarding() {
             <div class="steps">
               <Step
                 number={1}
-                title="On that computer, run"
+                title="在远程计算机运行"
                 done={connected()}
-                description="Installs browse there, opens its relay to other computers and prints its address and a pairing code."
+                description="安装 Browse CLI、允许远程连接，并生成中继地址与配对码。"
               >
                 <Show when={!connected()}>
                   <Command
                     text={remoteMethod().command}
-                    label="Copy command"
+                    label="复制命令"
                     picker={
                       <MethodMenu
                         methods={remoteInstallMethods}
@@ -265,9 +265,9 @@ function Onboarding() {
               </Step>
               <Step
                 number={2}
-                title="Enter its address and code"
+                title="输入中继地址与配对码"
                 done={connected()}
-                description={connected() ? <AgentDone relay={relay} pairedBy={pairedBy()} /> : "The code works once, within 10 minutes."}
+                description={connected() ? <AgentDone relay={relay} pairedBy={pairedBy()} /> : "配对码 10 分钟内有效，仅可用一次。"}
               >
                 <Show when={!connected()}>
                   <RelayForm relay={relay} remote />
@@ -282,9 +282,9 @@ function Onboarding() {
           <div class="hr" />
           <footer class="guide-foot">
             <span class="muted">
-              Agent on another computer?{" "}
+              智能体在其他计算机上？{" "}
               <button type="button" class="link" onClick={() => setWhere("remote")}>
-                Connect to it
+                连接远程智能体
               </button>
             </span>
           </footer>
@@ -294,10 +294,10 @@ function Onboarding() {
           <div class="hr" />
           <footer class="guide-foot">
             <Button variant="neutral" size="large" onClick={() => location.assign(settingsUrl())}>
-              Open settings
+              打开设置
             </Button>
             <span class="sep" aria-hidden="true" />
-            <span class="muted">You're set. When an agent needs you for a login, the page shows a card.</span>
+            <span class="muted hint">配置完成。需要登录时，页面会提示你接手。</span>
           </footer>
         </Show>
       </section>
@@ -321,7 +321,7 @@ function Step(props: { number: number; title: string; description?: JSX.Element;
         <div class="step-text">
           <h2 class="step-title">{props.title}</h2>
           <Show when={props.description}>
-            <p class="step-desc">{props.description}</p>
+            <p class="step-desc hint">{props.description}</p>
           </Show>
         </div>
         {props.children}
@@ -348,7 +348,7 @@ function Command(props: { text: string; label: string; picker?: JSX.Element }) {
         <IconButton
           variant="ghost-muted"
           size="small"
-          aria-label={props.label}
+          aria-label={copied() === "check" ? "已复制" : props.label}
           icon={<Icon name={copied() === "check" ? "check" : "copy"} size="small" />}
           onClick={() => void navigator.clipboard.writeText(props.text).then(flash)}
         />
@@ -361,7 +361,7 @@ function Command(props: { text: string; label: string; picker?: JSX.Element }) {
 function MethodMenu(props: { methods: InstallMethod[]; value: InstallMethod; onChange: (method: InstallMethod) => void }) {
   return (
     <Menu placement="bottom-start" gutter={4}>
-      <Menu.Trigger class="cmd-menu" aria-label="Install method">
+      <Menu.Trigger class="cmd-menu" aria-label="安装方式">
         {props.value.label}
         <Icon name="chevron-down" size="small" />
       </Menu.Trigger>
@@ -396,17 +396,17 @@ function AgentDone(props: { relay: Relay; pairedBy: "link" | "code" | undefined 
   const remote = () => (state()?.relay.remote ? state()?.relay.address : undefined)
   return (
     <>
-      {props.pairedBy ? "Paired and connected" : "Connected"}
+      {props.pairedBy ? "已配对并连接" : "已连接"}
       <Show when={state()?.browser}>
         {(browser) => (
           <>
-            {". This browser is "}
+            {"。浏览器标识："}
             <span class="kbd">{browser().id}</span>
           </>
         )}
       </Show>
-      <Show when={remote()}>{(address) => <>{" on the relay at "}<span class="kbd">{address()}</span></>}</Show>
-      .
+      <Show when={remote()}>{(address) => <>{"；中继："}<span class="kbd">{address()}</span></>}</Show>
+      。
     </>
   )
 }
@@ -419,8 +419,7 @@ function AgentStep(props: {
   linkNote: string | undefined
   onPaired: () => void
 }) {
-  const here = (remote: string | undefined) => (remote ? `the relay at ${remote}` : "the relay on this computer")
-  const capitalized = (text: string) => text.charAt(0).toUpperCase() + text.slice(1)
+  const here = (remote: string | undefined) => (remote ? `中继 ${remote}` : "本机中继")
   const kind = () => props.step.kind
   const remote = () => ("remote" in props.step ? props.step.remote : undefined)
   const unpacked = () => (props.step.kind === "update-extension" ? props.step.unpacked || chrome.runtime.id === unpackedExtensionId : false)
@@ -432,28 +431,28 @@ function AgentStep(props: {
 
       <Switch>
         <Match when={kind() === "checking"}>
-          <Waiting>Checking…</Waiting>
+          <Waiting>正在检查…</Waiting>
         </Match>
         <Match when={kind() === "install"}>
-          <Waiting>Waiting for your agent to connect…</Waiting>
+          <Waiting>正在等待智能体连接…</Waiting>
         </Match>
         <Match when={kind() === "finishing"}>
-          <Waiting>Finishing setup from your terminal. Keep install running.</Waiting>
+          <Waiting>正在完成配置，请保持终端中的安装命令运行。</Waiting>
         </Match>
         <Match when={props.step.kind === "pair" && props.step}>
           {(pair) => (
             <>
               <Note tone="warn">
                 {pair().reason === "code-rejected"
-                  ? `${capitalized(here(pair().remote))} didn't accept the pairing code: it was mistyped, already used or expired.`
+                  ? `${here(pair().remote)}未接受配对码：可能输入有误、已使用或已过期。`
                   : pair().reason === "refused"
-                    ? `${capitalized(here(pair().remote))} refused this browser's pairing: it was unpaired there, or that relay is a new install.`
-                    : `browse found ${here(pair().remote)}, but this browser isn't paired with it yet.`}{" "}
-                {pair().remote ? "" : "Run install again: it pairs by itself, or prints a code to enter below."}
+                    ? `${here(pair().remote)}拒绝配对：可能已取消配对或重新安装中继。`
+                    : `已发现${here(pair().remote)}，此浏览器尚未配对。`}{" "}
+                {pair().remote ? "" : "请重新运行安装命令以配对，或输入配对码。"}
               </Note>
               <CodeForm
                 relay={props.relay}
-                label={pair().remote ? "Run `browse pair` on that computer and enter the code it prints:" : "Or enter the code `browse pair` prints:"}
+                label={pair().remote ? "在远程计算机运行 `browse pair` 并输入配对码：" : "也可输入 `browse pair` 生成的配对码："}
                 onPaired={props.onPaired}
               />
             </>
@@ -463,59 +462,56 @@ function AgentStep(props: {
           {(waiting) =>
             waiting().pairing === "code" ? (
               <Waiting>
-                Code saved. It pairs as soon as {here(waiting().remote)} runs, within 10 minutes of <code>pair</code>.
+                配对码已保存，{here(waiting().remote)}启动后将自动配对。请在生成配对码后 10 分钟内完成。
               </Waiting>
             ) : (
-              <Waiting>Paired with {here(waiting().remote)}. The relay starts when your agent uses the browse tools.</Waiting>
+              <Waiting>已与{here(waiting().remote)}配对。智能体使用 Browse 工具时会启动中继。</Waiting>
             )
           }
         </Match>
         <Match when={props.step.kind === "connecting" && props.step}>
-          {(connecting) => <Waiting>{connecting().pairing ? "Pairing" : "Connecting"} with {here(connecting().remote)}…</Waiting>}
+          {(connecting) => <Waiting>正在{connecting().pairing ? "配对" : "连接"}{here(connecting().remote)}…</Waiting>}
         </Match>
         <Match when={kind() === "update-cli"}>
           <Note tone="warn">
-            This extension is newer than the browse CLI on this computer. Run this, then restart your agent. (With automatic
-            updates on, the CLI catches up by itself within a day.)
+            本机 Browse CLI 版本较旧。请手动运行以下命令更新，然后重启智能体。
           </Note>
-          <Command text={installCommand} label="Copy command" />
+          <Command text={installCommand} label="复制命令" />
         </Match>
         <Match when={kind() === "update-extension"}>
           <Show
             when={!unpacked()}
             fallback={
               <Note tone="warn">
-                <Rich text={unpackedReloadAdvice} />
+                <Rich text={unpackedReloadText} />
               </Note>
             }
           >
             <Note tone="warn">
-              This extension is older than the browse CLI on this computer. Chrome updates it within a few hours; to update
-              now, open the extensions page, turn on Developer mode and click Update.
+              此扩展版本较旧。请从个人源码手动更新，然后在扩展管理页重新加载。
             </Note>
             <div class="actions">
               <Button variant="neutral" onClick={() => void chrome.tabs.create({ url: "chrome://extensions" })}>
-                Open the extensions page
+                打开扩展管理页
               </Button>
             </div>
           </Show>
         </Match>
         <Match when={kind() === "mismatch"}>
-          <Note tone="warn">This extension and the browse CLI on this computer don't match. Run install again, then reconnect.</Note>
+          <Note tone="warn">扩展与本机 Browse CLI 版本不兼容。请重新运行安装命令后连接。</Note>
           <div class="actions">
             <Button variant="neutral" icon="refresh" onClick={() => props.relay.send({ type: "agents.reconnect" })}>
-              Reconnect
+              重新连接
             </Button>
           </div>
         </Match>
         <Match when={kind() === "conflict"}>
           <Note tone="warn">
-            browse in another browser or profile holds the relay's connection. Close it there (or quit that browser), then
-            reconnect.
+            其他浏览器或用户配置中的扩展已占用中继连接。请先关闭该扩展或浏览器，再重新连接。
           </Note>
           <div class="actions">
             <Button variant="neutral" icon="refresh" onClick={() => props.relay.send({ type: "agents.reconnect" })}>
-              Reconnect
+              重新连接
             </Button>
           </div>
         </Match>
@@ -536,10 +532,10 @@ function CodeForm(props: { relay: Relay; label: string; onPaired: () => void }) 
     if (message.type !== "relay.result" || !pending()) return
     setPending(false)
     if (message.status === "connected") props.onPaired()
-    if (message.status === "invalid-code") return setNote("That isn't a pairing code. Enter the 8 characters `browse pair` prints (XXXX-XXXX).")
+    if (message.status === "invalid-code") return setNote("配对码无效。请输入 `browse pair` 生成的 8 位配对码（XXXX-XXXX）。")
     setCode("")
     const address = message.address ?? ""
-    setNote(message.status === "connecting" ? `The relay ${address.startsWith("localhost:") ? "on this computer" : `at ${address}`} hasn't answered yet. This updates when it does.` : undefined)
+    setNote(message.status === "connecting" ? `${address.startsWith("localhost:") ? "本机中继" : `中继 ${address}`}尚未响应，连接后将自动刷新状态。` : undefined)
   })
   return (
     <form
@@ -557,9 +553,9 @@ function CodeForm(props: { relay: Relay; label: string; onPaired: () => void }) 
         <Rich text={props.label} />
       </p>
       <div class="inline-form">
-        <TextInput value={code()} onInput={(event) => setCode(event.currentTarget.value)} placeholder="XXXX-XXXX" aria-label="Pairing code" autocomplete="off" spellcheck={false} />
+        <TextInput value={code()} onInput={(event) => setCode(event.currentTarget.value)} placeholder="XXXX-XXXX" aria-label="配对码" autocomplete="off" spellcheck={false} />
         <Button type="submit" variant="contrast" disabled={pending()}>
-          {pending() ? "Pairing…" : "Pair"}
+          {pending() ? "正在配对…" : "配对"}
         </Button>
       </div>
       <Show when={note()}>{(text) => <Note tone="warn"><Rich text={text()} /></Note>}</Show>

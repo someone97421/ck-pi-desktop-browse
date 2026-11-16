@@ -14,6 +14,7 @@
 // uncovered, so the user can sign in with it during the handoff.
 // The toolbar badge shows the other states (ON, RUN).
 import { pageStatusFromJson, type PageStatus } from "../agent-relay/protocol"
+import brandIcon from "../../public/icons/icon-32.png?inline"
 
 type Loaded = { __opencodeBrowserPageStatus?: true }
 
@@ -60,18 +61,18 @@ function render() {
     const shadow = root ?? create()
     const pill = shadow.getElementById("pill")!
     pill.dataset.state = "waiting"
-    shadow.getElementById("label")!.textContent = "Waiting for you"
+    shadow.getElementById("label")!.textContent = "等待你操作"
     pill.title = [
-      current.owner === "session" ? "An agent opened this tab" : "You let agents use this tab",
-      current.sessionId ? `Session ${current.sessionId}` : undefined,
+      current.owner === "session" ? "Agent 打开了此标签页" : "你已允许 Agent 使用此标签页",
+      current.sessionId ? `会话 ${current.sessionId}` : undefined,
     ]
       .filter(Boolean)
       .join(" · ")
-    shadow.getElementById("message")!.textContent = current.message ?? "Finish this step, then continue."
+    shadow.getElementById("message")!.textContent = current.message ?? "完成当前步骤后，点击继续。"
     shadow.getElementById("origin")!.textContent = pageOrigin()
     const button = shadow.getElementById("continue") as HTMLButtonElement
     button.disabled = completing === current.handoffId
-    button.textContent = completing === current.handoffId ? "Continuing…" : "Continue"
+    button.textContent = completing === current.handoffId ? "正在继续…" : "继续"
     raise()
   }
   // The observer sees only this world's view of the DOM; the page can't see or disconnect it.
@@ -238,10 +239,10 @@ function create() {
   root = host.attachShadow({ mode: "closed" })
   root.innerHTML = `<style>${STYLE}</style>
     <div id="card" role="dialog" aria-labelledby="title" aria-describedby="message">
-      <div id="head"><span id="dot"></span><span id="title">Your turn</span><span id="source">${MARK}browse</span></div>
+      <div id="head"><span id="dot"></span><span id="title">轮到你了</span><span id="source">${MARK}这是一个助手</span></div>
       <p id="origin"></p>
       <p id="message"></p>
-      <div id="actions"><button id="continue" type="button">Continue</button></div>
+      <div id="actions"><button id="continue" type="button">继续</button></div>
     </div>
     <div id="pill" role="status" aria-live="polite">${MARK}<span id="label"></span><span id="light"></span></div>`
   root.getElementById("continue")!.addEventListener("click", (event) => {
@@ -280,7 +281,7 @@ function clear() {
   removeHost()
 }
 
-const MARK = `<svg class="mark" viewBox="0 0 16 20" width="9" height="11" aria-hidden="true"><path d="M12 16H4V8h8v8Z" fill="currentColor" opacity=".45"/><path d="M12 4H4v12h8V4Zm4 16H0V0h16v20Z" fill="currentColor"/></svg>`
+const MARK = `<img class="mark" src="${brandIcon}" width="14" height="14" alt="" aria-hidden="true">`
 
 // Colors follow the color scheme preference; the page itself may be light or dark either way, so both
 // surfaces are opaque enough to read on anything. Fonts are system fonts only: a page's own @font-face

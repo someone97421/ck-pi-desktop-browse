@@ -1,69 +1,63 @@
-// Plain-word lines both pages show: the connection's status (settings) and what a Connect to a relay led to. Text in
-// backticks shows as code.
 import type { AgentRelayState, CliUpdateNotice, ToStatusPage } from "../shared/protocol"
-import { unpackedReloadAdvice } from "../../cli/src/protocol"
 import { installCommand } from "./install"
 
 export type RelayResult = Extract<ToStatusPage, { type: "relay.result" }>
 
-/** The line both pages show when the relay's CLI is out of date; backticks mark the command. */
-export const cliUpdateText = (notice: CliUpdateNotice) =>
-  `browse ${notice.current} is out of date (${notice.latest} is out). Run \`${notice.command}\`.`
+export const unpackedReloadText = "请从个人源码手动更新扩展，然后在 `chrome://extensions` 找到「这是一个助手 · 浏览器」并点击重新加载。"
 
-/** What Connect led to, under the relay form. `codeSent`: the extension now holds the code it was given. */
+export const cliUpdateText = (notice: CliUpdateNotice) =>
+  `Browse CLI ${notice.current} 有可用更新 ${notice.latest}。请手动运行 \`${notice.command}\`。`
+
 export function relayResultText(result: RelayResult["status"], address: string, codeSent: boolean) {
   const local = address.startsWith("localhost:")
-  const at = local ? `on this computer (${address})` : `at ${address}`
+  const at = local ? `本机中继（${address}）` : `中继 ${address}`
   return {
-    "invalid-address": "That isn't an address. Use localhost, or a host or IP with an optional port: 100.64.0.2 or devbox.tailnet.ts.net:19988.",
-    "invalid-code": "That isn't a pairing code. Enter the 8 characters `browse pair` prints on the relay's computer (XXXX-XXXX).",
-    connected: `Connected to the relay ${at}.`,
-    connecting: `The relay ${at} hasn't answered yet. This updates when it does.`,
+    "invalid-address": "地址无效。请输入 localhost、主机名或 IP，可附带端口，如 devbox.tailnet.ts.net:19988。",
+    "invalid-code": "配对码无效。请输入中继所在计算机运行 `browse pair` 后生成的 8 位配对码（XXXX-XXXX）。",
+    connected: `已连接${at}。`,
+    connecting: `${at} 尚未响应，连接后将自动刷新状态。`,
     offline: codeSent
-      ? `Code saved. No relay answered ${at} yet; it pairs as soon as one runs there (within 10 minutes of \`pair\`).`
+      ? `配对码已保存。${at} 启动后将自动配对，请在生成配对码后 10 分钟内完成。`
       : local
-        ? `No relay answered ${at}. It starts the first time an agent uses the browse tools.`
-        : `No relay answered ${at}. Check the address, that an agent has started the relay there, and that \`browse set hostname 0.0.0.0\` was run there.`,
-    unpaired: `The relay ${at} answered, but this browser isn't paired with it. Run \`browse pair\` there and enter the code it prints.`,
-    untrusted: `The relay ${at} didn't accept the pairing. Run \`browse pair\` there and enter the new code it prints.`,
-    conflict: `The relay ${at} answered, but browse in another browser or profile is connected to it.`,
-    incompatible: `The relay ${at} and this extension speak different protocols. Update both, then reconnect.`,
+        ? `${at} 尚未响应。智能体首次使用 Browse 工具时会启动中继。`
+        : `${at} 尚未响应。请核对地址，确认远程中继已启动并运行过 \`browse set hostname 0.0.0.0\`。`,
+    unpaired: `${at} 已响应，但尚未配对。请在该计算机运行 \`browse pair\` 并输入配对码。`,
+    untrusted: `${at} 未接受配对。请在该计算机运行 \`browse pair\`，输入新的配对码。`,
+    conflict: `${at} 已被其他浏览器或用户配置中的扩展连接。`,
+    incompatible: `${at} 与此扩展的协议不兼容，请手动更新两者后重新连接。`,
   }[result]
 }
 
-/** Whether a relay result is good news, bad news or just news. */
 export const relayResultTone = (result: RelayResult["status"]): "ok" | "warn" | "neutral" =>
   result === "connected" ? "ok" : result === "connecting" || result === "offline" ? "neutral" : "warn"
 
-/** The connection, in a sentence. `unpacked`: this is the unpacked build install copied, which reloads to update. */
 export function describeStatus(state: AgentRelayState, unpacked: boolean) {
   const tabs = state.tabs.length
   const remote = state.relay.remote ? state.relay.address : undefined
   if (state.status === "connected") {
-    const connected = remote ? `Connected to the relay at ${remote}.` : "Connected."
-    return tabs ? `${connected} Agents are using ${tabs} tab${tabs === 1 ? "" : "s"}.` : `${connected} No agent is using a tab yet.`
+    const connected = remote ? `已连接中继 ${remote}。` : "已连接。"
+    return tabs ? `${connected}智能体正在使用 ${tabs} 个标签页。` : `${connected}暂无智能体使用标签页。`
   }
-  if (state.status === "connecting") return "Connecting to the relay…"
+  if (state.status === "connecting") return "正在连接中继…"
   if (state.status === "conflict")
-    return "browse in another browser or profile is connected. Close it there (or quit that browser), then click Reconnect."
+    return "其他浏览器或用户配置中的扩展已连接中继。请先关闭该扩展或浏览器，再重新连接。"
   if (state.status === "incompatible" && state.skew === "update-cli")
-    return `This extension is newer than the browse CLI on this computer. Update the CLI: run \`${installCommand}\` (with automatic updates on, it catches up by itself within a day), then click Reconnect.`
+    return `本机 Browse CLI 版本较旧。请手动运行 \`${installCommand}\` 更新，然后重新连接。`
   if (state.status === "incompatible" && state.skew === "update-extension")
     return state.unpacked || unpacked
-      ? unpackedReloadAdvice
-      : "This extension is older than the browse CLI on this computer. Chrome updates it within a few hours; to update now, open chrome://extensions, turn on Developer mode and click Update."
-  if (state.status === "incompatible") return "This extension and the installed CLI don't match. Run the install command again, then click Reconnect."
+      ? unpackedReloadText
+      : "此扩展版本较旧。请从个人源码手动更新，并在 `chrome://extensions` 重新加载扩展。"
+  if (state.status === "incompatible") return "扩展与 CLI 版本不兼容。请重新运行安装命令，再重新连接。"
   if (state.status === "unpaired")
-    return "Not paired yet. Run the install command from the setup page, or enter a pairing code under Advanced; until then no agent can use this browser."
+    return "尚未配对。请运行连接指南中的安装命令，或在高级设置输入配对码。"
   if (state.status === "untrusted" && remote)
-    return `The relay at ${remote} didn't pair with this browser, so it was refused. Run \`browse pair\` there, then enter the code under Advanced.`
+    return `中继 ${remote} 未接受此浏览器。请在该计算机运行 \`browse pair\`，在高级设置输入新配对码。`
   if (state.status === "untrusted")
     return state.unpacked
-      ? "The relay on this computer didn't pair with this browser, so it was refused. Run the install command again, or enter a code from `browse pair` under Advanced."
-      : "The relay on this computer didn't pair with this browser, so it was refused. Enter a new code from `browse pair` under Advanced, or update the CLI."
-  if (remote) return `Waiting for the relay at ${remote}. It starts the first time an agent there uses the browse tools.`
-  return "Waiting for an agent. The relay starts the first time an agent uses the browse tools."
+      ? "本机中继未接受此浏览器。请重新运行安装命令，或在高级设置输入 `browse pair` 生成的新配对码。"
+      : "本机中继未接受此浏览器。请在高级设置输入 `browse pair` 生成的新配对码，或手动更新 CLI。"
+  if (remote) return `正在等待中继 ${remote}。远程智能体首次使用 Browse 工具时会启动中继。`
+  return "正在等待智能体首次使用 Browse 工具并启动中继。"
 }
 
-/** Text split into plain parts and `code` parts, for rendering. */
 export const richParts = (text: string) => text.split(/`([^`]+)`/).map((part, index) => ({ code: index % 2 === 1, text: part }))

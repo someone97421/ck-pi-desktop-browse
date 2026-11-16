@@ -1,4 +1,5 @@
 import type { ActiveTabInfo, AgentRelayStatus } from "../shared/protocol"
+import type { BrowserReference } from "../shared/browser-reference"
 
 export function browserContext(tab: Pick<ActiveTabInfo, "tabId" | "title" | "url">): string {
   return `[浏览器调试上下文: tab=${tab.tabId}, title=${JSON.stringify(tab.title)}, url=${JSON.stringify(tab.url)} — 已挂载至 browse 工具，可直接对该 tab 调用 snapshot/console/network/screenshot/eval/click 等工具]`
@@ -14,4 +15,13 @@ export function pairingAddress(endpoint: string, port: number): string {
 export type RemoteStatus = { authenticated: boolean; online: boolean; canCompose: boolean }
 export function validFrameMessage(event: Pick<MessageEvent, "source" | "origin" | "data">, source: Window | null, origin: string): boolean {
   return source !== null && event.source === source && event.origin === origin && event.data !== null && typeof event.data === "object"
+}
+
+export function tabReference(tab: Pick<ActiveTabInfo, "tabId" | "windowId" | "title" | "url">): BrowserReference {
+  return { kind: "page", tabId: tab.tabId, windowId: tab.windowId, title: tab.title, url: tab.url }
+}
+
+export function confirmedInsertion(value: unknown): value is { inserted: true; clientId: string } {
+  return !!value && typeof value === "object" && "inserted" in value && value.inserted === true
+    && "clientId" in value && typeof value.clientId === "string" && value.clientId.trim().length > 0
 }

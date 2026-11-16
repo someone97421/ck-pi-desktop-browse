@@ -11,12 +11,12 @@ import {
 import { richParts } from "./describe"
 import "./pages.css"
 
-/** The opencode dark theme, unless the system asks for light. */
+/** 跟随系统深浅色。 */
 export function applyColorScheme() {
-  const light = matchMedia("(prefers-color-scheme: light)")
-  const apply = () => (document.documentElement.dataset.colorScheme = light.matches ? "light" : "dark")
+  const dark = matchMedia("(prefers-color-scheme: dark)")
+  const apply = () => (document.documentElement.dataset.colorScheme = dark.matches ? "dark" : "light")
   apply()
-  light.addEventListener("change", apply)
+  dark.addEventListener("change", apply)
 }
 
 /**
@@ -87,14 +87,14 @@ export function createFlash(label: string, done: string) {
 
 /** A command or prompt to copy, in monospace, with a Copy button. */
 export function CopyBox(props: { text: string; label?: string }) {
-  const [label, flash] = createFlash("Copy", "Copied")
+  const [label, flash] = createFlash("复制", "已复制")
   return (
     <div class="copy-box" aria-label={props.label}>
       <code>{props.text}</code>
       <Button
         size="small"
         variant="ghost"
-        icon={label() === "Copied" ? "check" : "copy"}
+        icon={label() === "已复制" ? "check" : "copy"}
         onClick={() => void navigator.clipboard.writeText(props.text).then(flash)}
       >
         {label()}
@@ -103,12 +103,12 @@ export function CopyBox(props: { text: string; label?: string }) {
   )
 }
 
-/** The browse mark and name, with an optional page name and something on the right. */
+/** 共用产品标识与页面导航。 */
 export function Brand(props: { page?: string; end?: JSX.Element }) {
   return (
     <header class="brand">
-      <img src="/icons/icon-48.png" width="24" height="24" alt="" />
-      <span class="brand-name">browse</span>
+      <img src="/icons/icon-48.png" width="32" height="32" alt="" />
+      <span class="brand-name">这是一个助手<span class="brand-product"> · 浏览器</span></span>
       <Show when={props.page}>
         <span class="brand-page">{props.page}</span>
       </Show>
@@ -120,7 +120,7 @@ export function Brand(props: { page?: string; end?: JSX.Element }) {
 /** A line in a tone: neutral, good or a warning. */
 export function Note(props: { tone?: "ok" | "warn" | "neutral"; children: JSX.Element }) {
   return (
-    <p class="note" data-tone={props.tone ?? "neutral"}>
+    <p class="note hint" role="status" data-tone={props.tone ?? "neutral"}>
       {props.children}
     </p>
   )

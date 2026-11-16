@@ -58,8 +58,8 @@ export async function sync(tabId: number, page: PageStatus | undefined, sessionN
     .create(PREFIX + tabId, {
       type: "basic",
       iconUrl: chrome.runtime.getURL("icons/icon-128.png"),
-      title: "browse",
-      message: `${sessionName(page?.sessionId)} needs you on ${origin}`,
+      title: "这是一个助手",
+      message: `${sessionName(page?.sessionId)} 正在等待你操作 ${origin}`,
       ...(page?.message ? { contextMessage: page.message } : {}),
       requireInteraction: true,
       priority: 2,
@@ -79,12 +79,12 @@ export async function clear(tabId: number) {
 }
 
 function originOf(url: string | undefined) {
-  if (!url) return "a page"
+  if (!url) return "当前页面"
   try {
     const parsed = new URL(url)
     return parsed.origin !== "null" ? parsed.host || parsed.origin : url
   } catch {
-    return "a page"
+    return "当前页面"
   }
 }
 

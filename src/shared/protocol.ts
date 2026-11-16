@@ -2,6 +2,7 @@
 // one `chrome.runtime.connect({ name: STATUS_PORT })` port and watches the relay connection through it.
 
 import type { PageStatus } from "../agent-relay/protocol"
+import type { BrowserReference } from "./browser-reference"
 
 /** The link to the browse relay, which runs agent sessions for the browse MCP server and CLI. */
 export type AgentRelayStatus =
@@ -192,6 +193,7 @@ export type RelaySettings = { humanInput: HumanInput }
 export type RelayOverrides = { agentWindow?: "current" | "separate"; humanInput?: HumanInput }
 
 export const STATUS_PORT = "opencode-browser.status"
+export const SIDEPANEL_PORT = "this-is-a-agent.sidepanel"
 export const TOOLBAR_MODE_KEY = "toolbarActionMode"
 
 export type ActiveTabInfo = {
@@ -224,3 +226,11 @@ export type FromStatusPage =
   | { type: "tab.toggleAttach"; tabId: number; requestId: string }
   | { type: "tab.ensureAttached"; tabId: number; requestId: string }
   | { type: "handoff.complete"; tabId: number; handoffId: string; requestId: string }
+
+export type FromSidepanel = FromStatusPage
+  | { type: "sidepanel.ready"; windowId: number; available: boolean }
+  | { type: "reference.result"; requestId: string; ok: boolean; error?: string }
+
+export type ToSidepanel = ToStatusPage
+  | { type: "browser.tabs"; browserId: string; active: boolean; tabs: BrowserReference[]; error?: string }
+  | { type: "reference.request"; requestId: string; reference: BrowserReference }

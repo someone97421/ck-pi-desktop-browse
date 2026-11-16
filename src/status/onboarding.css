@@ -1,6 +1,6 @@
-/* The onboarding guide, after Console's Connect OpenCode card (opencode-console features/onboarding). */
+/* 连接指南沿用远控控制台的配色与间距。 */
 .page {
-  --hair: 0.5px;
+  --hair: 1px;
   --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
   --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
   max-width: 720px;
@@ -13,10 +13,9 @@
 
 .guide {
   margin-top: 24px;
-  border: 0.5px solid var(--v2-border-border-muted);
-  border-radius: 6px;
+  border: 1px solid var(--v2-border-border-muted);
+  border-radius: 16px;
   background: var(--v2-background-bg-layer-01);
-  overflow: hidden;
 }
 
 .guide button {
@@ -26,17 +25,17 @@
 .guide-head {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  padding: 16px;
+  gap: 8px;
+  padding: 24px;
 }
 
 .guide-title {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  font-size: 15px;
-  line-height: 20px;
-  font-weight: 530;
+  font-size: 20px;
+  line-height: 28px;
+  font-weight: 600;
   letter-spacing: 0;
 }
 
@@ -76,7 +75,7 @@
   display: flex;
   gap: 2px;
   height: 48px;
-  padding: 0 16px 0 5px;
+  padding: 0 16px;
   align-items: stretch;
 }
 
@@ -138,7 +137,7 @@
 .steps {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
 }
 
 .step {
@@ -152,7 +151,7 @@
   flex: none;
   flex-direction: column;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   width: 20px;
 }
 
@@ -195,7 +194,7 @@
   display: flex;
   flex: 1;
   flex-direction: column;
-  gap: 14px;
+  gap: 16px;
   min-width: 0;
   padding-bottom: 24px;
 }
@@ -224,9 +223,11 @@
 .kbd {
   display: inline-flex;
   align-items: center;
-  height: 18px;
+  min-height: 20px;
+  max-width: 100%;
+  overflow-wrap: anywhere;
   padding: 0 4px;
-  border-radius: 2px;
+  border-radius: 4px;
   background: linear-gradient(rgb(255 255 255 / 0.06), rgb(255 255 255 / 0)), var(--v2-background-bg-layer-02);
   box-shadow: inset 0 0 0 0.5px var(--v2-border-border-base);
   color: var(--v2-text-text-base);
@@ -242,11 +243,10 @@
   align-self: flex-start;
   align-items: stretch;
   max-width: 100%;
-  min-height: 32px;
-  border-radius: 6px;
+  min-height: 36px;
+  border-radius: 8px;
   background: var(--v2-background-bg-button-neutral);
   box-shadow: var(--v2-elevation-raised);
-  overflow: hidden;
 }
 
 .cmd-menu {
@@ -287,30 +287,16 @@
   padding: 4px 4px 4px 12px;
 }
 
-/* One line, whatever the command is: the code area scrolls instead of wrapping, so the picker and copy button stay put. */
+/* 长命令自然换行，保留完整内容与复制入口。 */
 .cmd-text code {
   flex: 1 1 auto;
   min-width: 0;
   font-size: 12.5px;
   line-height: 18px;
-  white-space: nowrap;
-  overflow-x: auto;
-  overflow-y: hidden;
-  scrollbar-width: thin;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
-.cmd-text code::-webkit-scrollbar {
-  height: 4px;
-}
-
-.cmd-text code::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.cmd-text code::-webkit-scrollbar-thumb {
-  border-radius: 2px;
-  background: var(--v2-border-border-strong);
-}
 
 @media (hover: hover) and (pointer: fine) {
   .tab:hover {
@@ -389,9 +375,29 @@
     padding: 24px 16px;
   }
   .step {
-    gap: 14px;
+    gap: 12px;
   }
   .guide-foot .sep {
     display: none;
   }
+}
+
+.tab[data-selected] { color: var(--accent); }
+.tab[data-selected] > span { background: var(--accent-soft); }
+.guide-head { border-radius: 16px 16px 0 0; }
+.guide-body .step {
+  animation: step-enter 240ms cubic-bezier(.2,.8,.2,1) both;
+}
+.guide-body .step:nth-child(2) { animation-delay: 32ms; }
+.guide-body .step:nth-child(3) { animation-delay: 64ms; }
+@keyframes step-enter {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@media (max-width: 520px) {
+  .guide-head { padding: 20px 16px; }
+  .cmd { flex-wrap: wrap; width: 100%; }
+  .cmd-menu { min-height: 32px; }
+  .cmd-text { flex-basis: 100%; }
+  .cmd-sep { display: none; }
 }

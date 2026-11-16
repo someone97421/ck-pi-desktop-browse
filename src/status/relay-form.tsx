@@ -48,20 +48,20 @@ export function RelayForm(props: { relay: Relay; help?: boolean; remote?: boolea
     <form class="relay-form" onSubmit={submit}>
       <div class="relay-fields">
         <Field>
-          <Field.Label>Relay address</Field.Label>
+          <Field.Label>中继地址</Field.Label>
           <TextInput
             value={address()}
             onInput={(event) => {
               setEdited(true)
               setAddress(event.currentTarget.value)
             }}
-            placeholder={props.remote ? "100.64.0.1 or devbox" : "localhost:19988"}
+            placeholder={props.remote ? "100.64.0.1 或主机名" : "localhost:19988"}
             autocomplete="off"
             spellcheck={false}
           />
         </Field>
         <Field>
-          <Field.Label>Pairing code</Field.Label>
+          <Field.Label>配对码</Field.Label>
           <TextInput
             value={code()}
             onInput={(event) => setCode(event.currentTarget.value)}
@@ -73,12 +73,12 @@ export function RelayForm(props: { relay: Relay; help?: boolean; remote?: boolea
       </div>
       <Show when={props.help}>
         <p class="hint">
-          <Rich text="On the agent's computer, run `browse set hostname 0.0.0.0` and `browse pair`, then enter that computer's Tailscale IP or name and the code it prints. The code works once, within 10 minutes." />
+          <Rich text="在智能体所在计算机运行 `browse set hostname 0.0.0.0` 和 `browse pair`，填写其 Tailscale IP 或主机名及配对码。配对码 10 分钟内有效，仅可用一次。" />
         </p>
       </Show>
       <div class="actions">
         <Button type="submit" variant="contrast" disabled={pending()}>
-          {pending() ? "Connecting…" : "Connect"}
+          {pending() ? "正在连接…" : "连接"}
         </Button>
       </div>
       <Show when={result()}>

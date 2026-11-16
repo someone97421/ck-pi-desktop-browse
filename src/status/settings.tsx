@@ -36,9 +36,9 @@ import { DEFAULT_SERVER_ORIGIN, SERVER_ORIGIN_KEY, normalizeServerOrigin } from 
 import { cliUpdateText, describeStatus } from "./describe"
 import { RelayForm } from "./relay-form"
 import { applyColorScheme, Brand, CopyBox, createRelay, createStored, Note, Rich } from "./ui"
+import { ElementSettings } from "./element-settings"
 import "./settings.css"
 
-const capitalized = (text: string) => text.charAt(0).toUpperCase() + text.slice(1)
 
 function Settings() {
   const relay = createRelay()
@@ -59,10 +59,10 @@ function Settings() {
       const origin = normalizeServerOrigin(harnessOrigin() ?? storedHarnessOrigin())
       void chrome.storage.local.set({ [SERVER_ORIGIN_KEY]: origin }).then(() => {
         setHarnessOrigin(origin)
-        showToast({ title: "Harness address saved", description: "The Browse sidepanel will use it next time it opens.", variant: "success" })
+        showToast({ title: "桌面服务地址已保存", description: "下次打开侧栏时生效。", variant: "success" })
       })
     } catch (error) {
-      showToast({ title: "Invalid Harness address", description: error instanceof Error ? error.message : String(error), variant: "error" })
+      showToast({ title: "桌面服务地址无效", description: "请输入有效的 HTTP 或 HTTPS 服务地址。", variant: "error" })
     }
   }
   const [name, setName] = createSignal<string>()
@@ -72,7 +72,7 @@ function Settings() {
     // The background reconnects on the change, and the relay names the browser afresh.
     void (next ? chrome.storage.local.set({ [BROWSER_NAME_KEY]: next }) : chrome.storage.local.remove(BROWSER_NAME_KEY)).then(() => {
       setName(undefined)
-      showToast({ title: next ? "Name saved" : "Name reset", description: "browse reconnects so agents see it.", variant: "success" })
+      showToast({ title: next ? "名称已保存" : "名称已重置", description: "重新连接后，智能体即可使用新名称。", variant: "success" })
     })
   }
 
@@ -83,21 +83,21 @@ function Settings() {
   let advanced!: HTMLDetailsElement
   const openAdvanced = () => {
     advanced.open = true
-    advanced.scrollIntoView({ block: "nearest", behavior: "smooth" })
+    advanced.scrollIntoView({ block: "nearest", behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth" })
   }
 
   const copyDiagnostics = () =>
     void chrome.runtime
       .sendMessage({ action: AGENT_DIAGNOSTICS })
-      .then((response: { text?: string } | undefined) => navigator.clipboard.writeText(response?.text ?? "No diagnostics."))
-      .then(() => showToast({ title: "Diagnostics copied", description: "Paste them into a bug report.", variant: "success" }))
+      .then((response: { text?: string } | undefined) => navigator.clipboard.writeText(response?.text ?? "暂无诊断信息。"))
+      .then(() => showToast({ title: "诊断信息已复制", description: "可粘贴到问题反馈中。", variant: "success" }))
 
   return (
     <main class="settings">
       <Brand
         end={
           <a class="link" href={chrome.runtime.getURL("onboarding.html")}>
-            Setup guide
+            连接指南
           </a>
         }
       />
@@ -116,7 +116,7 @@ function Settings() {
                   icon={kind() === "reconnect" ? "refresh" : undefined}
                   onClick={kind() === "pair" ? openAdvanced : reconnect}
                 >
-                  {kind() === "pair" ? "Pair with a code" : "Reconnect"}
+                  {kind() === "pair" ? "使用配对码" : "重新连接"}
                 </Button>
               )}
             </Show>
@@ -142,113 +142,113 @@ function Settings() {
 
         <Show when={state()?.update}>
           {(update) => (
-            <Section title="update available">
-              <p class="row-desc">{capitalized(update().summary)}. Run this in a terminal, or ask your agent to update browse:</p>
+            <Section title="有可用更新">
+              <p class="row-desc hint">请在终端执行以下命令，手动更新 Browse CLI：</p>
               <CopyBox text={update().command} />
             </Section>
           )}
         </Show>
 
-        <Section title="this browser">
+        <Section title="当前浏览器">
           <Row
-            label="Name for agents"
-            description="When several browsers connect to one relay, agents pick one by this name. The first to connect is the default."
+            label="浏览器名称"
+            description="供智能体区分浏览器；最先连接的浏览器为默认项。"
           >
             <form class="name-form" onSubmit={saveName}>
               <TextInput
                 value={name() ?? storedName()}
                 onInput={(event) => setName(event.currentTarget.value)}
                 maxlength={60}
-                placeholder="Browser and computer"
-                aria-label="Name for agents"
+                placeholder="浏览器与计算机名称"
+                aria-label="浏览器名称"
                 autocomplete="off"
                 spellcheck={false}
               />
               <Button type="submit" variant="neutral">
-                Save
+                保存
               </Button>
             </form>
           </Row>
         </Section>
-        <Section title="Harness">
-          <Row label="Harness address" description="The desktop Harness used by the Browse sidepanel and its embedded Renderer.">
+        <Section title="桌面服务">
+          <Row label="服务地址" description="侧栏所连接的桌面服务（Harness）地址。">
             <form class="name-form" onSubmit={saveHarnessOrigin}>
               <TextInput
                 value={harnessOrigin() ?? storedHarnessOrigin()}
                 onInput={(event) => setHarnessOrigin(event.currentTarget.value)}
                 placeholder={DEFAULT_SERVER_ORIGIN}
-                aria-label="Harness address"
+                aria-label="桌面服务地址"
                 autocomplete="off"
                 spellcheck={false}
               />
-              <Button type="submit" variant="neutral">Save</Button>
+              <Button type="submit" variant="neutral">保存</Button>
             </form>
           </Row>
         </Section>
 
-        <Section title="agent tabs">
-          <Row label="Where agents open their tabs" description="In the background of your window, or one of their own.">
+        <Section title="智能体标签页">
+          <Row label="标签页打开位置" description="在当前窗口后台打开，或使用独立窗口。">
             <SegmentedControl
               class="seg-window"
               value={agentWindow()}
               onChange={(value) => value && setAgentWindow(value as AgentWindowPlacement)}
             >
-              <SegmentedControlItem value="current">Your window</SegmentedControlItem>
-              <SegmentedControlItem value="separate">Own window</SegmentedControlItem>
+              <SegmentedControlItem value="current">当前窗口</SegmentedControlItem>
+              <SegmentedControlItem value="separate">独立窗口</SegmentedControlItem>
             </SegmentedControl>
           </Row>
           <Override overrides={state()?.overrides} setting="agentWindow" />
-          <Row label="Group tabs" description="One shared group, or one per agent session.">
+          <Row label="标签页分组" description="合并所有智能体标签页，或按会话分组。">
             <SegmentedControl
               class="seg-group"
               value={grouping()}
               onChange={(value) => value && setGrouping(value as AgentGrouping)}
             >
-              <SegmentedControlItem value="shared">All agents</SegmentedControlItem>
-              <SegmentedControlItem value="session">Per session</SegmentedControlItem>
-              <SegmentedControlItem value="none">None</SegmentedControlItem>
+              <SegmentedControlItem value="shared">统一分组</SegmentedControlItem>
+              <SegmentedControlItem value="session">按会话</SegmentedControlItem>
+              <SegmentedControlItem value="none">不分组</SegmentedControlItem>
             </SegmentedControl>
           </Row>
           <Row
-            label="Close idle tabs after"
-            description="Stays open while a script or recording runs, or a handoff waits."
+            label="闲置标签页自动关闭"
+            description="脚本运行、录制或等待人工接手时保持打开。"
           >
             <SegmentedControl class="seg-idle" value={String(idle())} onChange={(value) => value !== null && setIdle(Number(value))}>
-              <SegmentedControlItem value="10">10 min</SegmentedControlItem>
-              <SegmentedControlItem value="30">30 min</SegmentedControlItem>
-              <SegmentedControlItem value="60">1 hour</SegmentedControlItem>
-              <SegmentedControlItem value="0">Never</SegmentedControlItem>
+              <SegmentedControlItem value="10">10 分钟</SegmentedControlItem>
+              <SegmentedControlItem value="30">30 分钟</SegmentedControlItem>
+              <SegmentedControlItem value="60">1 小时</SegmentedControlItem>
+              <SegmentedControlItem value="0">永不</SegmentedControlItem>
             </SegmentedControl>
           </Row>
         </Section>
 
-        <Section title="agent input">
+        <Section title="智能体输入">
           <Row
-            label="Human-like input"
-            description="Curved mouse paths, paced typing and scrolling. Off is faster, but easier for sites to flag as a bot."
+            label="模拟真人输入"
+            description="使用自然的鼠标轨迹、打字与滚动节奏；关闭后更快，但更易被网站识别。"
           >
             <Switch hideLabel checked={human() === "on"} onChange={(on) => setHuman(on ? "on" : "off")}>
-              Human-like input
+              模拟真人输入
             </Switch>
           </Row>
           <Override overrides={state()?.overrides} setting="humanInput" />
         </Section>
 
-        <Section title="handoffs">
+        <Section title="人工接手">
           <Row
-            label="Notify me on every handoff"
-            description="A system notification as well as the card on the page. Off: only on recorded tabs, where there's no card."
+            label="每次接手时通知"
+            description="同时发送系统通知；关闭后仅录制中的标签页发送通知。"
           >
             <Switch hideLabel checked={notifications() === "always"} onChange={(on) => setNotifications(on ? "always" : "recording")}>
-              Notify me on every handoff
+              每次接手时通知
             </Switch>
           </Row>
         </Section>
 
         <Show when={state()?.autoUpdate?.install === "npm" && state()?.autoUpdate}>
           {(autoUpdate) => (
-            <Section title="updates">
-              <Row label="When a new version is published" description={updateFacts(autoUpdate())}>
+            <Section title="更新">
+              <Row label="发现新版本时" description={updateFacts(autoUpdate())}>
                 <SegmentedControl
                   class="seg-update"
                   value={autoUpdate().mode}
@@ -256,17 +256,17 @@ function Settings() {
                     if (value === "on" || value === "notify" || value === "off") relay.send({ type: "autoUpdate.set", mode: value })
                   }}
                 >
-                  <SegmentedControlItem value="on">Install</SegmentedControlItem>
-                  <SegmentedControlItem value="notify">Tell me</SegmentedControlItem>
-                  <SegmentedControlItem value="off">Off</SegmentedControlItem>
+                  <SegmentedControlItem value="on">安装</SegmentedControlItem>
+                  <SegmentedControlItem value="notify">仅提醒</SegmentedControlItem>
+                  <SegmentedControlItem value="off">关闭</SegmentedControlItem>
                 </SegmentedControl>
               </Row>
               <Show when={autoUpdate().overriddenBy}>
                 {(variable) => (
                   <Note tone="warn">
-                    In effect:{" "}
-                    {({ on: "automatic", notify: "notify only", off: "off" } satisfies Record<AutoUpdateMode, string>)[autoUpdate().effective]}. Set
-                    by <code>{variable()}</code> on the relay.
+                    当前生效：
+                    {({ on: "自动安装", notify: "仅提醒", off: "关闭" } satisfies Record<AutoUpdateMode, string>)[autoUpdate().effective]}。
+                    由中继环境变量 <code>{variable()}</code> 指定。
                   </Note>
                 )}
               </Show>
@@ -277,8 +277,8 @@ function Settings() {
         <div class="hr" />
         <details class="advanced" ref={advanced}>
           <summary class="advanced-summary">
-            <span class="advanced-title">advanced</span>
-            <span class="advanced-hint">relay address, pairing code, diagnostics</span>
+            <span class="advanced-title">高级设置</span>
+            <span class="advanced-hint">中继地址、配对码与诊断</span>
             <Icon class="advanced-chevron" name="chevron-down" size="small" />
           </summary>
           <div class="advanced-body">
@@ -293,34 +293,36 @@ function Settings() {
               )}
             </Show>
             <RelayForm relay={relay} />
-            <p class="row-desc">
-              <Rich text="The relay runs on this computer unless your agent runs on another one: run `browse set hostname 0.0.0.0` there, then enter that computer's Tailscale IP or name. A pairing code is only needed for a new relay, or after this browser was unpaired: run `browse pair` on the relay's computer. It works once, within 10 minutes." />
+            <p class="row-desc hint">
+              <Rich text="连接其他计算机：在该计算机运行 `browse set hostname 0.0.0.0`，填写其 Tailscale IP 或主机名。首次配对或取消配对后，运行 `browse pair` 获取配对码（10 分钟内有效，仅可用一次）。" />
             </p>
             <div class="actions">
               <Button variant="neutral" icon="refresh" onClick={reconnect}>
-                Reconnect
+                重新连接
               </Button>
               <Button
                 variant="neutral"
                 onClick={() => {
                   relay.send({ type: "tabs.cleanup" })
-                  showToast({ title: "Agent tabs closed", variant: "success" })
+                  showToast({ title: "已发送关闭标签页请求", variant: "success" })
                 }}
               >
-                Close agent tabs
+                关闭智能体标签页
               </Button>
               <Button variant="neutral" icon="copy" onClick={copyDiagnostics}>
-                Copy diagnostics
+                复制诊断信息
               </Button>
             </div>
             <p class="advanced-id">
-              Extension ID <code>{chrome.runtime.id}</code>
+              扩展 ID <code>{chrome.runtime.id}</code>
             </p>
           </div>
         </details>
       </section>
 
-      <footer class="settings-foot">Agents open their own tabs. To share one of yours, click the browse button on it.</footer>
+      <ElementSettings />
+
+      <footer class="settings-foot hint">共享当前标签页：点击工具栏中的「这是一个助手」扩展图标。</footer>
       <Toast.Region />
     </main>
   )
@@ -347,7 +349,7 @@ function Row(props: { label: string; description?: string; children: JSX.Element
         <span class="row-label">{props.label}</span>
         <Show when={props.description}>
           {(description) => (
-            <span class="row-desc">
+            <span class="row-desc hint">
               <Rich text={description()} />
             </span>
           )}
@@ -360,23 +362,23 @@ function Row(props: { label: string; description?: string; children: JSX.Element
 
 /** The connection in a few words, for the top of the card; Advanced has the long version. */
 function statusText(state: AgentRelayState | undefined) {
-  if (state === undefined) return "Connecting to the relay…"
+  if (state === undefined) return "正在连接中继…"
   const remote = state.relay.remote ? state.relay.address : undefined
   switch (state.status) {
     case "connected":
-      return remote ? `Connected to the relay at ${remote}` : "Connected to the relay on this computer"
+      return remote ? `已连接中继 ${remote}` : "已连接本机中继"
     case "connecting":
-      return "Connecting to the relay…"
+      return "正在连接中继…"
     case "conflict":
-      return "Another browser is using the relay"
+      return "其他浏览器正在使用中继"
     case "incompatible":
-      return "This extension and the relay don't match"
+      return "扩展与中继版本不兼容"
     case "unpaired":
-      return "Not paired with the relay"
+      return "尚未与中继配对"
     case "untrusted":
-      return "The relay didn't accept this browser"
+      return "中继未接受此浏览器"
     default:
-      return remote ? `Waiting for the relay at ${remote}` : "Waiting for an agent"
+      return remote ? `正在等待中继 ${remote}` : "正在等待智能体"
   }
 }
 
@@ -386,19 +388,19 @@ function statusDetail(state: AgentRelayState | undefined) {
   const remote = state.relay.remote ? state.relay.address : undefined
   switch (state.status) {
     case "connected":
-      return state.browser ? `\`${state.browser.id}\` is how agents call this browser.` : "No agent is using a tab yet."
+      return state.browser ? `智能体通过 \`${state.browser.id}\` 识别此浏览器。` : "暂无智能体使用标签页。"
     case "offline":
       return remote
-        ? "It starts the first time an agent there uses the browse tools."
-        : "The relay starts the first time an agent uses the browse tools."
+        ? "远程智能体首次使用 Browse 工具时，中继会启动。"
+        : "智能体首次使用 Browse 工具时，中继会启动。"
     case "conflict":
-      return "Close browse in the other browser or profile, then reconnect."
+      return "请关闭其他浏览器或用户配置中的此扩展，然后重新连接。"
     case "incompatible":
-      return "Update this extension and the browse CLI on this computer."
+      return "请手动更新此扩展与本机 Browse CLI。"
     case "unpaired":
-      return "Until it's paired, no agent can use this browser."
+      return "配对后，智能体才能使用此浏览器。"
     case "untrusted":
-      return "Enter a new code from `browse pair` on the relay's computer."
+      return "请在中继所在计算机运行 `browse pair`，输入新的配对码。"
     default:
       return undefined
   }
@@ -410,8 +412,8 @@ const primaryAction = (state: AgentRelayState | undefined) =>
 
 // A setting the relay's environment fixes wins over the page's; say so, with the value in effect.
 const overrideNotes: { [Key in keyof RelayOverrides]-?: { variable: string; labels: Record<NonNullable<RelayOverrides[Key]>, string> } } = {
-  agentWindow: { variable: "OPENCODE_BROWSER_AGENT_WINDOW", labels: { current: "in your window", separate: "in a separate window" } },
-  humanInput: { variable: "OPENCODE_BROWSER_HUMAN_INPUT", labels: { on: "on", off: "off" } },
+  agentWindow: { variable: "OPENCODE_BROWSER_AGENT_WINDOW", labels: { current: "当前窗口", separate: "独立窗口" } },
+  humanInput: { variable: "OPENCODE_BROWSER_HUMAN_INPUT", labels: { on: "开启", off: "关闭" } },
 }
 function Override(props: { overrides: RelayOverrides | undefined; setting: keyof RelayOverrides }) {
   const value = () => props.overrides?.[props.setting]
@@ -419,8 +421,8 @@ function Override(props: { overrides: RelayOverrides | undefined; setting: keyof
     <Show when={value()}>
       {(current) => (
         <Note tone="warn">
-          In effect: {(overrideNotes[props.setting].labels as Record<string, string>)[current()]}. Set by{" "}
-          <code>{overrideNotes[props.setting].variable}</code> on the relay.
+          当前生效：{(overrideNotes[props.setting].labels as Record<string, string>)[current()]}。由中继环境变量
+          <code>{overrideNotes[props.setting].variable}</code> 指定。
         </Note>
       )}
     </Show>
@@ -430,9 +432,9 @@ function Override(props: { overrides: RelayOverrides | undefined; setting: keyof
 /** The relay's update state, in a sentence or two. */
 function updateFacts(autoUpdate: NonNullable<AgentRelayState["autoUpdate"]>) {
   return [
-    autoUpdate.version ? `Installed: ${autoUpdate.version}${autoUpdate.channel === "dev" ? " (dev channel)" : ""}.` : "",
-    autoUpdate.pending ? `${autoUpdate.pending} is ready and switches in once no agent is using the browser.` : "",
-    !autoUpdate.pending && autoUpdate.latest && autoUpdate.latest !== autoUpdate.version ? `Newest: ${autoUpdate.latest}.` : "",
+    autoUpdate.version ? `已安装：${autoUpdate.version}${autoUpdate.channel === "dev" ? "（开发版）" : ""}。` : "",
+    autoUpdate.pending ? `${autoUpdate.pending} 已就绪，将在智能体停止使用浏览器后切换。` : "",
+    !autoUpdate.pending && autoUpdate.latest && autoUpdate.latest !== autoUpdate.version ? `最新版本：${autoUpdate.latest}。` : "",
   ]
     .filter(Boolean)
     .join(" ")

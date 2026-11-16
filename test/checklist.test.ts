@@ -43,9 +43,9 @@ describe("onboarding checklist", () => {
 
 describe("relay results", () => {
   test("say where, in plain words", () => {
-    expect(relayResultText("connected", "devbox:19988", false)).toBe("Connected to the relay at devbox:19988.")
-    expect(relayResultText("offline", "localhost:19988", false)).toContain("on this computer (localhost:19988)")
-    expect(relayResultText("offline", "devbox:19988", true)).toStartWith("Code saved.")
+    expect(relayResultText("connected", "devbox:19988", false)).toBe("已连接中继 devbox:19988。")
+    expect(relayResultText("offline", "localhost:19988", false)).toContain("本机中继（localhost:19988）")
+    expect(relayResultText("offline", "devbox:19988", true)).toStartWith("配对码已保存。")
   })
 
   test("mark commands as code", () => {

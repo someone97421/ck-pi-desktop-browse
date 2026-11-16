@@ -1,12 +1,14 @@
-// 扩展页面共用 Relay 状态端口，侧边栏额外订阅所属窗口的当前标签页。
-import { AGENT_DIAGNOSTICS, STATUS_PORT, TOOLBAR_MODE_KEY, type ActiveTabInfo, type FromStatusPage, type ToStatusPage } from "../shared/protocol"
+// 设置页订阅连接状态，独立侧栏端口另负责当前窗口的引用与标签列表。
+import { AGENT_DIAGNOSTICS, SIDEPANEL_PORT, STATUS_PORT, TOOLBAR_MODE_KEY, type ActiveTabInfo, type FromSidepanel, type FromStatusPage, type ToStatusPage } from "../shared/protocol"
 import { createAgentRelay } from "./agent-relay"
 import { TabCleanup } from "./tab-cleanup"
+import { createBrowserReferences } from "./browser-references"
 
 const BADGE_COLORS: Record<string, string> = { default: "#3b3b3b", RUN: "#b45309", WAIT: "#2563eb" }
 const pages = new Set<chrome.runtime.Port>()
 const windows = new Map<chrome.runtime.Port, number>()
 const tabOperations = new Map<number, Promise<void>>()
+const browserReferences = createBrowserReferences()
 const agents = createAgentRelay({
   changed: (state) => {
     broadcast({ type: "agents", state })
@@ -42,11 +44,14 @@ chrome.runtime.onConnect.addListener((port) => {
   const page = sender?.id === chrome.runtime.id &&
     sender.url?.startsWith(`${origin}/`) === true &&
     (sender.origin === undefined || sender.origin === origin || sender.origin === `${origin}/`)
-  if (port.name !== STATUS_PORT || !page) return
+  const sidepanelPage = sender?.url?.split(/[?#]/)[0] === chrome.runtime.getURL("sidepanel.html")
+  const sidepanel = port.name === SIDEPANEL_PORT && sidepanelPage
+  if (!page || !(sidepanel || (port.name === STATUS_PORT && !sidepanelPage))) return
+  if (sidepanel) browserReferences.addPanel(port)
   pages.add(port)
   port.onDisconnect.addListener(() => { pages.delete(port); windows.delete(port) })
-  port.onMessage.addListener((message: FromStatusPage) => {
-    if (typeof message !== "object" || message === null) return
+  port.onMessage.addListener((message: FromSidepanel) => {
+    if (typeof message !== "object" || message === null || message.type === "sidepanel.ready" || message.type === "reference.result") return
     if (message.type === "agents.reconnect") agents.reconnect()
     if (message.type === "tabs.cleanup") void TabCleanup.cleanup({ minutes: 0 })
     if (message.type === "autoUpdate.set") agents.setAutoUpdate(message.mode)
@@ -108,7 +113,7 @@ async function handleTabRequest(port: chrome.runtime.Port, message: TabRequest) 
         return
       }
       if (message.type === "tab.ensureAttached" && before.attached) return
-      if (agents.state().status !== "connected") throw new Error("请先连接 Browse Relay")
+      if (agents.state().status !== "connected") throw new Error("请先连接浏览器连接服务")
       const desired = message.type === "tab.ensureAttached" || !before.attached
       await agents.attachTab(id)
       const deadline = Date.now() + 8_000
@@ -127,13 +132,15 @@ async function handleTabRequest(port: chrome.runtime.Port, message: TabRequest) 
 }
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  const reference = browserReferences.runtimeMessage(message, sender, sendResponse)
+  if (reference !== undefined) return reference
   const relay = agents.runtimeMessage(message, sender, sendResponse)
   if (relay !== undefined) return relay
   const page = sender.id === chrome.runtime.id && sender.url?.startsWith(`chrome-extension://${chrome.runtime.id}/`)
   if (!page || typeof message !== "object" || message?.action !== AGENT_DIAGNOSTICS) return false
   void agents.diagnostics().then(
     (text) => sendResponse({ text }),
-    (error: unknown) => sendResponse({ text: `Diagnostics failed: ${String(error)}` }),
+    (error: unknown) => sendResponse({ text: `诊断失败：${String(error)}` }),
   )
   return true
 })
@@ -159,10 +166,10 @@ async function updateBadges(tabs?: chrome.tabs.Tab[]) {
     const badge = agents.badge(tab.id)
     await chrome.action.setBadgeText({ tabId: tab.id, text: badge?.text ?? "" }).catch(() => undefined)
     await chrome.action.setBadgeBackgroundColor({ tabId: tab.id, color: BADGE_COLORS[badge?.text ?? ""] ?? BADGE_COLORS.default }).catch(() => undefined)
-    await chrome.action.setTitle({ tabId: tab.id, title: badge?.title ?? "browse · 打开侧边栏对话与浏览器调试" }).catch(() => undefined)
+    await chrome.action.setTitle({ tabId: tab.id, title: badge?.title ?? "这是一个助手 · 打开侧栏对话与浏览器调试" }).catch(() => undefined)
   }))
 }
 function broadcast(message: ToStatusPage) { pages.forEach((port) => post(port, message)) }
 function post(port: chrome.runtime.Port, message: ToStatusPage) {
-  try { port.postMessage(message) } catch { pages.delete(port); windows.delete(port) }
+  try { port.postMessage(message) } catch { pages.delete(port); windows.delete(port); browserReferences.removePanel(port) }
 }
