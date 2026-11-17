@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import { relayPortHint, relayPorts } from "../src/agent-relay/protocol"
 import { chooseRelayPort, relayTarget, scanRelayPorts } from "../src/background/agent-relay/discovery"
-import { pairingLink } from "../src/status/pairing-link"
+import { relayProbeResult } from "../src/agent-relay/probe"
 
 // Where an automatic connection looks for the relay, and what a pairing hint may say. No chrome and no network: the
 // scan's fetch is mocked per test, and the rest is pure.
@@ -11,26 +11,7 @@ afterEach(() => {
   globalThis.fetch = realFetch
 })
 
-describe("pairing link fragment", () => {
-  test("takes the code and the relay port when it is one browse uses", () => {
-    expect(pairingLink("#code=ABCD1234&port=19990")).toEqual({ code: "ABCD1234", port: 19990 })
-    expect(pairingLink("#code=ABCD1234&port=19988")).toEqual({ code: "ABCD1234", port: 19988 })
-    expect(pairingLink("#code=ABCD1234")).toEqual({ code: "ABCD1234" })
-  })
-
-  test("ignores a port that isn't a browse relay's", () => {
-    expect(pairingLink("#code=ABCD1234&port=19989")).toEqual({ code: "ABCD1234" })
-    expect(pairingLink("#code=ABCD1234&port=19987")).toEqual({ code: "ABCD1234" })
-    expect(pairingLink("#code=ABCD1234&port=19999")).toEqual({ code: "ABCD1234" })
-    expect(pairingLink("#code=ABCD1234&port=abc")).toEqual({ code: "ABCD1234" })
-  })
-
-  test("isn't a link without a usable code", () => {
-    expect(pairingLink("#code=short")).toBeUndefined()
-    expect(pairingLink("#ticket=ABCD1234")).toBeUndefined()
-    expect(pairingLink("")).toBeUndefined()
-  })
-
+describe("relay ports", () => {
   test("the accepted ports are the default and its fallbacks, and nothing else", () => {
     expect(relayPorts).toEqual([19988, 19990, 19991, 19992, 19993, 19994, 19995, 19996, 19997])
     for (const port of relayPorts) expect(relayPortHint(port)).toBe(port)
@@ -105,5 +86,16 @@ describe("relay scan", () => {
     expect(chooseRelayPort([19990, 19991, 19988], { proven: 19990, tokenFor: (port) => port === 19991 })).toBe(19990)
     expect(chooseRelayPort([19990, 19991, 19988], { tokenFor: (port) => port === 19991 })).toBe(19991)
     expect(chooseRelayPort([], { tokenFor: () => true })).toBeUndefined()
+  })
+})
+
+describe("relay probe", () => {
+  test("recognizes browse's own answers and nothing else", () => {
+    expect(relayProbeResult(200, { version: "0.0.2", buildId: "x", instanceId: "abc", pid: 1 })).toBe("found")
+    expect(relayProbeResult(403, { error: "Cross-origin browser requests are not allowed" })).toBe("found")
+    expect(relayProbeResult(403, { error: "Cross-origin browser requests are not allowed", installWaiting: true })).toBe("install-waiting")
+    expect(relayProbeResult(200, { version: "1.0" })).toBe("absent")
+    expect(relayProbeResult(404, undefined)).toBe("absent")
+    expect(relayProbeResult(undefined, undefined)).toBe("absent")
   })
 })

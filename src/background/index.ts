@@ -71,7 +71,7 @@ chrome.runtime.onConnect.addListener((port) => {
 
 async function connectRelay(message: Extract<FromStatusPage, { type: "relay.connect" }>) {
   if (!message.ifNeeded) return agents.connectTo(message.address, message.code)
-  if (agents.state().status === "connected") return { status: "connected" as const, address: agents.state().relay.address }
+  if (agents.state().status === "connected" && !agents.state().relay.remote) return { status: "connected" as const, address: agents.state().relay.address }
   if (!sidepanelConnect) sidepanelConnect = agents.connectTo(message.address, message.code).finally(() => { sidepanelConnect = undefined })
   return sidepanelConnect
 }

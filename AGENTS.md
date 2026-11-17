@@ -2,7 +2,7 @@
 
 ## 仓库定位
 
-本仓库是个人自用魔改版，不向上游贡献代码。个人远端为 `https://github.com/someone97421/ck-pi-desktop-browse.git`，当前主开发分支为 `dev`。上游资料已归档至 `docs/archive/upstream/`，仅作历史参考字典，无需遵守；本文件是唯一仓库级智能体规则。
+本仓库是「这是一个助手」桌面应用的配套 Chromium 扩展，专项维护主程序的浏览器连接、侧栏和引用，不再维护面向其他客户端的通用安装、独立 CLI 或远程 Relay 配对体验。本仓库为个人自用魔改版，不向上游贡献代码。个人远端为 `https://github.com/someone97421/ck-pi-desktop-browse.git`，当前主开发分支为 `dev`。上游资料已归档至 `docs/archive/upstream/`，仅作历史参考字典，无需遵守；本文件是唯一仓库级智能体规则。
 
 ## 核心底线
 
@@ -18,8 +18,8 @@
 
 直接在当前主开发分支工作，不要求新建分支或工作树；无需设计提案、架构记录或变更清单。默认不运行测试、构建或服务；以差异和静态审查为主，动态验证按用户授权执行。源码、配置和文档统一使用 UTF-8 无 BOM。
 
-- `src/` 是 Chromium 扩展；`rust/` 是当前 CLI/Relay；`cli/` 保留旧 TypeScript 实现和行为参考，不能误当作废弃文件删除。
-- `rust/crates/browse-core` 定义公共契约，`browse-relay` 负责连接、配对与标签页，`browse-page/capture/script` 分别负责页面、采集及 QuickJS。扩展与两套 Relay 的协议需兼容。
+- `src/` 是 Chromium 扩展；`rust/` 提供主程序内置 CLI/Relay；`cli/` 保留旧 TypeScript 实现和行为参考，不能误当作废弃文件删除。
+- `rust/crates/browse-core` 定义公共契约，`browse-relay` 负责连接、配对与标签页，`browse-page/capture/script` 分别负责页面、采集及 QuickJS。保留已有底层协议及数据兼容，主程序服务地址配置和跨机密码登录继续支持。
 - 用户配置、令牌及状态沿用既有 XDG 路径和格式。`relay-pairing.json` 是本机一次性配对文件，保持忽略且禁止打包；保留许可证与第三方版权声明。
 - 运行时 MCP 指令（如 `instructions*.md`、`agent-guide.ts`）是产品内容，不是开发规则。依赖镜像、商店和第三方资源按用途判断，不批量替换。
 
@@ -52,8 +52,7 @@
 
 ## 环境速查
 
-- 依赖安装：`bun install --frozen-lockfile`；旧 CLI：`cd cli && bun install --frozen-lockfile`。
-- 源码安装：`bun run setup`（构建扩展与旧 CLI，配置客户端并配对）。
+- 依赖安装：`bun install --frozen-lockfile`。
 - 扩展开发：`bun run dev`；扩展构建：`bun run build`；本地打包：`bun run package`。
-- Rust 构建：`cd rust && cargo build --release --locked -p browse`；旧 CLI 构建：`cd cli && bun run build`。
-- 静态检查：`bun run typecheck`；旧 CLI：`cd cli && bun run typecheck`。
+- 主程序内置组件开发：`cd rust && cargo build --release --locked -p browse`。
+- 静态检查：`bun run typecheck`。

@@ -1,6 +1,6 @@
 import { SIDEPANEL_PORT, type ActiveTabInfo, type AgentRelayState, type FromSidepanel, type ToSidepanel } from "../shared/protocol"
 import type { BrowserReference } from "../shared/browser-reference"
-import { apiOrigin, frameUrl, loadServerOrigin } from "./config"
+import { apiOrigin, frameUrl, isLoopbackOrigin, loadServerOrigin } from "./config"
 import { extensionSession } from "./session"
 import { browserContext, confirmedInsertion, needsPairing, pairingAddress, tabReference, validFrameMessage, type RemoteStatus } from "./context"
 
@@ -14,6 +14,10 @@ let browserTabs: BrowserReference[] = [], browserTabsActive = false
 let browserId = "", browserTabsError: string | undefined
 let relayResult: { resolve: (status: string) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> } | undefined
 let pairingTask: Promise<void> | undefined
+let extensionSessionTask: Promise<string> | undefined
+let contextStarted = false, contextStarting = false, lastContextAttempt = 0
+let composerDraftKey = "", contextDraftKey = ""
+let frameResponded = false, frameChecking = false, frameLoadedAt = Date.now()
 const pending = new Map<string, { resolve: (tab: ActiveTabInfo | undefined) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> }>()
 const framePending = new Map<string, { resolve: (result: unknown) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> }>()
 let dragSession: string | undefined
@@ -69,7 +73,7 @@ function announceReady() {
   if (windowId === undefined || !port) return
   send({ type: "sidepanel.ready", windowId, available: available() })
 }
-function frameRequest(method: string, reference?: BrowserReference, target?: "current"): Promise<unknown> {
+function frameRequest(method: string, reference?: BrowserReference, target?: "current", draftKey?: string): Promise<unknown> {
   if (!available()) return Promise.reject(new Error("请先登录主程序并等待连接就绪"))
   const targetWindow = frame.contentWindow
   if (!targetWindow) return Promise.reject(new Error("主程序页面尚未就绪，请稍后重试"))
@@ -78,12 +82,12 @@ function frameRequest(method: string, reference?: BrowserReference, target?: "cu
     const timer = setTimeout(() => { framePending.delete(requestId); reject(new Error("主程序未确认操作，请检查连接后重试")) }, 65_000)
     framePending.set(requestId, { resolve, reject, timer })
     try {
-      targetWindow.postMessage({ type: "pi-desktop:request", requestId, method, ...(reference === undefined ? {} : { reference }), ...(target ? { target } : {}) }, apiOrigin())
+      targetWindow.postMessage({ type: "pi-desktop:request", requestId, method, ...(reference === undefined ? {} : { reference }), ...(target ? { target } : {}), ...(draftKey ? { draftKey } : {}) }, apiOrigin())
     } catch (error) { clearTimeout(timer); framePending.delete(requestId); reject(error) }
   })
 }
-async function insertReference(reference: BrowserReference, target?: "current") {
-  const result = await frameRequest("browser.insertReference", reference, target)
+async function insertReference(reference: BrowserReference, target: "current" = "current", draftKey?: string) {
+  const result = await frameRequest("browser.insertReference", reference, target, draftKey)
   if (!confirmedInsertion(result)) throw new Error("主程序未确认网页引用的接收位置，请重试")
   return result
 }
@@ -98,7 +102,8 @@ function respond(requestId: string, ok: boolean, result?: unknown, error?: unkno
 async function handleExtensionSession(requestId: string) {
   const target = frame.contentWindow, origin = apiOrigin()
   try {
-    const token = await extensionSession(origin)
+    extensionSessionTask ??= extensionSession(origin).finally(() => { extensionSessionTask = undefined })
+    const token = await extensionSessionTask
     target?.postMessage({ type: "pi-desktop:extension-session-response", requestId, ok: true, token }, origin)
   } catch (error) {
     target?.postMessage({ type: "pi-desktop:extension-session-response", requestId, ok: false, error: error instanceof Error ? error.message : String(error) }, origin)
@@ -106,15 +111,19 @@ async function handleExtensionSession(requestId: string) {
 }
 window.addEventListener("message", (event) => {
   if (!validFrameMessage(event, frame.contentWindow, apiOrigin())) return
+  frameResponded = true
   const data = event.data
   if (data.type === "pi-desktop:extension-session-request" && typeof data.requestId === "string") {
     void handleExtensionSession(data.requestId)
   } else if (data.type === "pi-desktop:remote-status") {
     const justAuthenticated = data.authenticated === true && !auth.authenticated
     auth = { authenticated: data.authenticated === true, online: data.online === true, canCompose: data.canCompose === true }
+    composerDraftKey = typeof data.draftKey === "string" ? data.draftKey : ""
+    if (!contextDraftKey && typeof data.initialDraftKey === "string") contextDraftKey = data.initialDraftKey
     if (!available()) { resetFrameRequests(); clearTabs() }
     if (justAuthenticated) { lastAttempt = 0; lastEnsure = 0 }
     announceReady(); sendFrameStatus(); sendFrameTabs(); void autoPair()
+    void initializeCurrentPage()
   } else if (data.type === "pi-desktop:response" && typeof data.requestId === "string") {
     const item = framePending.get(data.requestId)
     if (!item) return
@@ -129,6 +138,8 @@ window.addEventListener("message", (event) => {
   }
 })
 frame.addEventListener("load", () => {
+  frameResponded = false; frameLoadedAt = Date.now(); contextStarted = false; lastContextAttempt = 0
+  composerDraftKey = ""; contextDraftKey = ""
   resetFrameRequests(); auth = { authenticated: false, online: false, canCompose: false }
   clearTabs(); announceReady(); sendFrameStatus()
   frame.contentWindow?.postMessage({ type: "pi-desktop:status-request" }, apiOrigin())
@@ -163,8 +174,11 @@ function connect() {
   port = connected
   connected.onMessage.addListener((event: ToSidepanel) => {
     if (port !== connected) return
-    if (event.type === "agents") { state = event.state; sendFrameStatus(); void autoPair() }
-    if (event.type === "tab.activeInfo") { if (active?.tabId !== event.tab?.tabId || active?.url !== event.tab?.url) endPick(true); active = event.tab; sendFrameStatus() }
+    if (event.type === "agents") { state = event.state; sendFrameStatus(); void autoPair(); void initializeCurrentPage() }
+    if (event.type === "tab.activeInfo") {
+      if (active?.tabId !== event.tab?.tabId || active?.url !== event.tab?.url) endPick(true)
+      active = event.tab; sendFrameStatus(); void initializeCurrentPage()
+    }
     if (event.type === "browser.tabs") {
       if (event.browserId) browserId = event.browserId
       browserTabsError = event.error
@@ -202,7 +216,7 @@ function connect() {
   announceReady()
   send({ type: "tab.activeInfo", windowId })
 }
-function relayConnected() { return state?.status === "connected" }
+function relayConnected() { return state?.status === "connected" && (!isLoopbackOrigin(apiOrigin()) || !state.relay.remote) }
 async function waitForRelayReady(timeoutMs = 12_000) {
   const deadline = Date.now() + timeoutMs
   while (!relayConnected() && !needsPairing(state?.status)) {
@@ -216,19 +230,23 @@ function pairRelay(): Promise<void> {
 }
 async function connectRelay() {
   if (relayConnected()) return
+  if (!isLoopbackOrigin(apiOrigin())) throw new Error("跨机侧栏尚未连接浏览器调试，请在主程序所在电脑使用本机扩展进行网页调试")
   if (!auth.authenticated || !auth.online) throw new Error("请先登录主程序")
   if (!port) throw new Error("扩展后台正在重连")
   pairing = true; sendFrameStatus()
   try {
-    if (state?.status === "offline") {
+    const switching = state?.relay.remote === true
+    if (state?.status === "offline" || switching) {
       ensuring = true; lastEnsure = Date.now(); sendFrameStatus()
       try {
         await frameRequest("browse.ensureRelay")
-        send({ type: "agents.reconnect" })
-        await waitForRelayReady()
+        if (!switching) {
+          send({ type: "agents.reconnect" })
+          await waitForRelayReady()
+        }
       } finally { ensuring = false; sendFrameStatus() }
     }
-    if (relayConnected() || !needsPairing(state?.status)) return
+    if (relayConnected() || (!switching && !needsPairing(state?.status))) return
     lastAttempt = Date.now()
     const result = await frameRequest("browse.mintPairingCode") as { code: string; port: number; endpoint: string }
     if (!result?.code) throw new Error("主程序未返回浏览器连接服务配对码")
@@ -242,10 +260,42 @@ async function connectRelay() {
     if (status !== "connected") throw new Error(`浏览器连接服务配对未完成：${status}`)
   } finally { pairing = false; sendFrameStatus() }
 }
-async function autoPair() {
-  if (!auth.authenticated || !auth.online || !state || state.relay.remote || !port || pairing || ensuring) return
+async function initializeCurrentPage() {
+  if (contextStarted || contextStarting || busy || !available() || !auth.canCompose || !relayConnected() || !port || !active) return
+  if (contextDraftKey && composerDraftKey !== contextDraftKey) { contextStarted = true; return }
+  if (!/^(https?|file):/.test(active.url) || Date.now() - lastContextAttempt < 5000) return
+  const selected = active, source = port
+  contextDraftKey ||= composerDraftKey
+  contextStarting = true; busy = true; lastContextAttempt = Date.now(); sendFrameStatus()
   try {
-    if (state.status === "offline" && Date.now() - lastEnsure >= 30_000) await pairRelay()
+    const tab = await request({ type: "tab.ensureAttached", tabId: selected.tabId })
+    if (!tab?.attached) throw new Error("当前页未确认进入调试状态")
+    if (source !== port || !available() || active?.tabId !== tab.tabId || active.url !== tab.url) return
+    if (contextDraftKey && composerDraftKey !== contextDraftKey) { contextStarted = true; return }
+    // 插入回执可能丢失，发出后不自动重放，以免生成重复 chip。
+    contextStarted = true
+    await insertReference(tabReference(tab), "current", contextDraftKey || undefined)
+  } catch (error) {
+    console.warn(contextStarted ? "侧栏网页引用未获确认，请检查草稿后使用当前页按钮重试" : "侧栏当前网页调试初始化失败，将在连接就绪后重试", error)
+  } finally { contextStarting = false; busy = false; sendFrameStatus() }
+}
+
+async function recoverFrame() {
+  if (suspended || frameResponded || frameChecking || !frame.src || Date.now() - frameLoadedAt < 15_000) return
+  frameChecking = true
+  try {
+    const response = await fetch(new URL("/api/health", apiOrigin()), { cache: "no-store", credentials: "omit", signal: AbortSignal.timeout(3000) })
+    if (response.ok && !frameResponded && !suspended) {
+      frameLoadedAt = Date.now()
+      frame.src = frameUrl(apiOrigin(), chrome.runtime.getURL("").replace(/\/$/, ""))
+    }
+  } catch { /* 主程序尚未启动，保留侧栏并等待下一次检查。 */ }
+  finally { frameChecking = false }
+}
+async function autoPair() {
+  if (!isLoopbackOrigin(apiOrigin()) || !auth.authenticated || !auth.online || !state || !port || pairing || ensuring) return
+  try {
+    if ((state.status === "offline" || state.relay.remote) && Date.now() - lastEnsure >= 30_000) await pairRelay()
     else if (needsPairing(state.status) && Date.now() - lastAttempt >= 30_000) await pairRelay()
   } catch { /* 后续 iframe 状态更新展示连接结果。 */ }
 }
@@ -282,6 +332,10 @@ window.addEventListener("pageshow", () => {
   else announceReady()
   frame.contentWindow?.postMessage({ type: "pi-desktop:status-request" }, apiOrigin())
 })
+setInterval(() => {
+  if (suspended) return
+  void autoPair(); void initializeCurrentPage(); void recoverFrame()
+}, 5000)
 async function boot() {
   await loadServerOrigin()
   windowId = (await chrome.windows.getCurrent()).id

@@ -1,6 +1,7 @@
 import { afterAll, expect, test } from "bun:test"
 import { StubEvent } from "../chrome-stub"
 import type { AgentRelayState } from "../../src/shared/protocol"
+import { loadServerOrigin } from "../../src/sidepanel/config"
 
 class Element extends EventTarget {
   textContent = ""; title = ""; value = ""; src = ""
@@ -18,14 +19,20 @@ const extensionOrigin = `chrome-extension://${"a".repeat(32)}`
 const server = "http://127.0.0.1:7878"
 const background: any[] = []
 const port = { onMessage: new StubEvent(), onDisconnect: new StubEvent(), postMessage: (message: unknown) => background.push(message) }
+let storedOrigin: string | undefined
 const interval = globalThis.setInterval
 const timers: ReturnType<typeof setInterval>[] = []
+globalThis.setInterval = ((...args: Parameters<typeof setInterval>) => {
+  const timer = Reflect.apply(interval, globalThis, args) as ReturnType<typeof setInterval>
+  timers.push(timer)
+  return timer
+}) as typeof setInterval
 Object.assign(globalThis, {
   window: page,
   document: Object.assign(new EventTarget(), { getElementById: node, hidden: false }),
   chrome: {
     runtime: { connect: () => port, getURL: () => `${extensionOrigin}/` },
-    storage: { local: { get: async () => ({}), set: async () => {} } },
+    storage: { local: { get: async () => ({ chromeSidebarServerOrigin: storedOrigin }), set: async () => {} } },
     windows: { getCurrent: async () => ({ id: 7 }) },
   },
 })
@@ -54,6 +61,26 @@ test("侧栏只通过 iframe 推送 Browse 状态并拒绝错误来源", async (
   await settle()
   const status = messages.at(-1)!.message
   expect(status).toMatchObject({ type: "pi-desktop:browse-status", borrowed: false, browserContext: expect.stringContaining("tab=42"), authenticated: false, online: false, busy: false })
+})
+
+test("首次输入框就绪后自动调试当前页并向侧栏插入一次 chip", async () => {
+  receive({ type: "pi-desktop:remote-status", authenticated: true, online: true, canCompose: false, draftKey: "temporary:startup" })
+  const before = background.filter(message => message.type === "tab.ensureAttached").length
+  expect(before).toBe(0)
+  receive({ type: "pi-desktop:remote-status", authenticated: true, online: true, canCompose: true, draftKey: "temporary:startup" })
+  const attach = background.findLast(message => message.type === "tab.ensureAttached")
+  expect(attach).toMatchObject({ tabId: 42 })
+  port.onMessage.emit({ type: "tab.result", requestId: attach.requestId, ok: true, tab: { tabId: 42, windowId: 7, title: "当前页", url: "https://example.test", attached: true, badge: "ON" } })
+  await settle()
+  const insertion = messages.findLast(item => item.message.type === "pi-desktop:request" && item.message.method === "browser.insertReference")!.message
+  expect(insertion).toMatchObject({ target: "current", reference: { kind: "page", tabId: 42 } })
+  receive({ type: "pi-desktop:response", requestId: insertion.requestId, ok: true, result: { inserted: true, clientId: "sidebar-composer" } })
+  await settle()
+  receive({ type: "pi-desktop:remote-status", authenticated: true, online: false, canCompose: false, draftKey: "temporary:startup" })
+  receive({ type: "pi-desktop:remote-status", authenticated: true, online: true, canCompose: true, draftKey: "temporary:startup" })
+  agent("connected")
+  await settle()
+  expect(background.filter(message => message.type === "tab.ensureAttached")).toHaveLength(before + 1)
 })
 
 test("iframe Browse 请求先经过后台并回传 response", async () => {
@@ -91,6 +118,7 @@ test("工具栏 iframe 拖动消息启动捕捉，真实插入回执后才转发
   expect(pickerReplies("toolbar-1")).toEqual([])
   expect(background.some((message) => message.type === "reference.result" && message.requestId === "dom-drop")).toBe(false)
   const request = messages.findLast((item) => item.message.type === "pi-desktop:request" && item.message.method === "browser.insertReference")!.message
+  expect(request.target).toBe("current")
   receive({ type: "pi-desktop:response", requestId: request.requestId, ok: true, result: { inserted: true, clientId: "composer" } })
   await settle()
   expect(background).toContainEqual({ type: "reference.result", requestId: "dom-drop", ok: true })
@@ -194,6 +222,48 @@ test("离线 Relay 启动后进入待配对状态，继续自动配对且不重�
   agent("connected")
   port.onMessage.emit({ type: "relay.result", status: "connected" })
   await settle()
+})
+
+test("旧远程中继连接自动切回主程序本机调试服务", async () => {
+  receive({ type: "pi-desktop:remote-status", authenticated: false, online: false, canCompose: false })
+  port.onMessage.emit({ type: "agents", state: {
+    status: "connected", pairing: "token", tabs: [],
+    relay: { address: "devbox:19988", remote: true },
+  } })
+  const before = messages.length
+  receive({ type: "pi-desktop:remote-status", authenticated: true, online: true, canCompose: true })
+  await settle()
+  const ensure = messages.slice(before).find((item) => item.message.method === "browse.ensureRelay")!.message
+  receive({ type: "pi-desktop:response", requestId: ensure.requestId, ok: true })
+  await settle()
+  const mint = messages.slice(before).find((item) => item.message.method === "browse.mintPairingCode")!.message
+  receive({ type: "pi-desktop:response", requestId: mint.requestId, ok: true,
+    result: { code: "local-pair", endpoint: "http://127.0.0.1:19988", port: 19988 } })
+  await settle()
+  expect(background.at(-1)).toEqual({ type: "relay.connect", address: "127.0.0.1:19988", code: "local-pair", ifNeeded: true })
+  agent("connected")
+  port.onMessage.emit({ type: "relay.result", status: "connected" })
+  await settle()
+})
+
+test("跨机主程序不触发本机配对，也不替换已有远程连接", async () => {
+  receive({ type: "pi-desktop:remote-status", authenticated: false, online: false, canCompose: false })
+  storedOrigin = "http://192.168.8.2:7878"
+  await loadServerOrigin()
+  try {
+    port.onMessage.emit({ type: "agents", state: { status: "connected", pairing: "token", tabs: [],
+      relay: { address: "192.168.8.2:19988", remote: true } } })
+    const before = messages.length, backgroundBefore = background.length
+    receive({ type: "pi-desktop:remote-status", authenticated: true, online: true, canCompose: false }, storedOrigin)
+    await settle()
+    expect(messages.slice(before).filter((item) => ["browse.ensureRelay", "browse.mintPairingCode"].includes(item.message.method))).toHaveLength(0)
+    expect(background.slice(backgroundBefore).filter((item) => item.type === "relay.connect")).toHaveLength(0)
+  } finally {
+    storedOrigin = undefined
+    await loadServerOrigin()
+    receive({ type: "pi-desktop:remote-status", authenticated: false, online: false, canCompose: false })
+    agent("connected")
+  }
 })
 
 test("显式取消与 iframe 重载会向后台结束当前捕捉", () => {

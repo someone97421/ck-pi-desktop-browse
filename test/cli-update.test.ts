@@ -1,7 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { cliUpdateNotice, type RelayAutoUpdate } from "../src/shared/protocol"
 import { relayAutoUpdate } from "../src/background/agent-relay/wire"
-import { cliUpdateText } from "../src/status/describe"
 
 // When the extension tells the user its browse CLI is out of date, and when a normal pending auto-update stays quiet.
 
@@ -83,10 +82,9 @@ describe("cliUpdateNotice", () => {
     expect(cliUpdateNotice({ ...base, mode: "notify", effective: "notify", latest: "build-20261114" }, NOW)).toMatchObject({ reason: "mode" })
   })
 
-  test("uses the relay's command for a binary install and names the version plainly", () => {
+  test("uses the relay's command for a binary install", () => {
     const notice = cliUpdateNotice({ ...base, cli: "/opt/browse/bin/browse", mode: "notify", effective: "notify" }, NOW)!
     expect(notice.command).toBe("/opt/browse/bin/browse update")
-    expect(cliUpdateText(notice)).toBe("Browse CLI 0.0.16 有可用更新 0.0.17。请手动运行 `/opt/browse/bin/browse update`。")
   })
 })
 

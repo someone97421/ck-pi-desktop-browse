@@ -21,20 +21,22 @@ DOM 准星入口只显示在 Chrome 扩展侧栏中；扩展设置可以关闭�
 
 ## 安装扩展
 
-1. 从本仓库 [Releases](https://github.com/someone97421/ck-pi-desktop-browse/releases) 下载 `browse-extension-版本号.zip` 并解压到固定目录。
-2. 在 Chrome 打开 `chrome://extensions`，启用「开发者模式」。
-3. 点击「加载已解压的扩展程序」，选择包含 `manifest.json` 的解压目录。
-4. 点击扩展图标打开侧栏。升级时将新版解压到原目录，再在扩展管理页点击重新加载。
+1. 先安装并启动 [「这是一个助手」桌面应用](https://github.com/someone97421/CK-PI-Desktop)，再从本仓库的 [Releases](https://github.com/someone97421/ck-pi-desktop-browse/releases) 下载最新的 `browse-extension-版本号.zip`。扩展只提供 ZIP 手动安装包，不提供 CRX 或 Chrome 商店安装。
+2. 将 ZIP 解压到一个固定目录。不要直接选择 ZIP 文件，也不要在安装后移动或删除该目录。
+3. 在 Chrome 或其他 Chromium 浏览器打开 `chrome://extensions`，启用「开发者模式」，点击「加载已解压的扩展程序」，选择包含 `manifest.json` 的解压目录。
+4. 安装后的引导显示主程序服务可用性和浏览器调试状态，可打开侧栏、重新检测或进入设置。点击扩展图标也可打开侧栏。升级时下载新版 ZIP，解压并替换原目录内容，再在扩展管理页点击「重新加载」。
 
-GitHub 发布包用于手动加载，保留固定扩展身份；本仓库不自动安装商店版本，也不向 Chrome 商店发布。浏览器内部页面等受限页面不能注入网页引用工具。
+GitHub 发布包保留固定扩展身份，因此升级时应替换原目录并重新加载；不需要安装 CLI、构建 CLI、填写 MCP 配置或输入配对码。浏览器内部页面等受限页面不能注入网页引用工具。
 
 ## 连接桌面应用
 
 1. 安装并启动包含内置 Browse 的新版 [「这是一个助手」](https://github.com/someone97421/CK-PI-Desktop)。本机浏览器连接默认启用；已有明确停用插件的用户需重新启用。
 2. 安装扩展后直接点击图标打开侧栏。同机默认连接 `http://127.0.0.1:7878`，无需密码、配对码、安装 CLI 或填写 MCP 配置。
-3. 打开需要的会话。标签页、选文和 DOM 引用会加入当前可编辑的聊天输入框，Relay 在后台自动连接和配对。
+3. 首次打开侧栏时，主程序创建独立的临时草稿；输入框就绪后，扩展接入当前普通网页并插入页面引用，首次发送时才保存正式会话。也可在当前侧栏会话中加入标签页、选文和 DOM 引用。
 
 如果修改过主程序端口，在扩展设置中同步服务地址。跨机器连接须先在主程序设置远控密码并开启访问，再将扩展服务地址改为桌面主机的局域网地址、使用密码登录。直接打开远控端口网页也始终需要密码，包括 localhost。本机扩展免密由真实扩展来源的专用通道提供，不会让普通网页免密。
+
+浏览器调试的自动准备与连接仅用于本机主程序。跨机侧栏保留主程序对话和已有调试连接，不会将其他电脑签发的配对信息用于本机，也不会自动覆盖已有调试地址。
 
 侧栏显示主程序提供的原始 Renderer，布局适配和文件菜单由局域网远程控制插件负责。文件「打开」「在文件管理器中显示」等系统操作在桌面主机执行。SSH 远程工作区目前不支持完整文件预览和下载，会显示明确错误。
 
@@ -61,20 +63,16 @@ bun run build
 
 扩展包写入 `release/browse-extension-版本号.zip`。本地一次性配对文件 `relay-pairing.json` 不会打进发布包。
 
-## 独立 CLI 开发
+## 主程序内置组件开发
 
-桌面主程序已内置 CLI、Relay 与 MCP，普通使用无需执行本节。需要独立开发 CLI 或接入其他 MCP 客户端时，可从源码构建；当前 CLI 使用 Rust 实现，旧 TypeScript CLI 保留供源码使用与行为参考。
+桌面主程序已内置 Browse CLI、Relay 与 MCP，普通使用无需单独安装或配置。开发主程序内置组件时，可从源码构建 Rust CLI：
 
 ```bash
 cd rust
 cargo build --release --locked -p browse
-cd ..
-./rust/target/release/browse install
 ```
 
-Windows 可执行文件名为 `browse.exe`。按安装提示完成 MCP 客户端配置和浏览器配对，扩展继续使用本仓库的安装包或本地 `dist/`。
-
-旧 TypeScript 安装入口为根目录的 `bun run setup`，会构建扩展与旧 CLI 并配置所选客户端；也可在 `cli/` 中执行 `bun install --frozen-lockfile`、`bun run build`。`install` 和 `install.ps1` 只处理已克隆的个人源码，不下载上游发行包。
+Windows 可执行文件名为 `browse.exe`。旧 TypeScript CLI（`cli/`）及相关协议保留作为底层实现和行为参考。
 
 ## 发布
 
@@ -90,7 +88,7 @@ Windows 可执行文件名为 `browse.exe`。按安装提示完成 MCP 客户端
 | `src/sidepanel/` | 桌面 Renderer 的侧栏容器与消息桥接 |
 | `src/status/`、`src/content/` | 设置、引导、网页状态提示与元素提取 |
 | `public/` | manifest、图标与静态资源 |
-| `rust/crates/browse/` | Rust CLI、MCP 代理与本机安装 |
+| `rust/crates/browse/` | 主程序内置 Rust CLI 与 MCP 代理 |
 | `rust/crates/browse-{core,relay,page,capture,script}/` | 公共契约、Relay、页面工具、采集与脚本执行 |
 | `cli/` | 旧 TypeScript CLI |
 | `scripts/` | 编译、统一版本、打包与产物检查 |

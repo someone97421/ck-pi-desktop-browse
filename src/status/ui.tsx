@@ -1,7 +1,6 @@
 // What the onboarding and settings pages share: the color scheme, the port to the worker, stored settings as signals,
 // and a few small pieces of UI built on @opencode/ui.
 import { createSignal, For, onCleanup, Show, type JSX } from "solid-js"
-import { Button } from "@opencode/ui/button"
 import {
   STATUS_PORT,
   type AgentRelayState,
@@ -19,38 +18,31 @@ export function applyColorScheme() {
   dark.addEventListener("change", apply)
 }
 
-/**
- * The status port to the worker: its latest state, and every other message as it arrives. The worker can stop and
- * restart at any time; the port follows it, and `onMessage` listeners hear `undefined` when a reply was lost with it.
- */
+/** 设置页和引导页订阅后台状态，并在后台重启后重新连接。 */
 export function createRelay() {
   const [state, setState] = createSignal<AgentRelayState>()
-  const listeners = new Set<(message: ToStatusPage | undefined) => void>()
   let port: chrome.runtime.Port | undefined
+  let timer: ReturnType<typeof setTimeout> | undefined
+  let stopped = false
   const connect = () => {
+    if (stopped) return
     const next = chrome.runtime.connect({ name: STATUS_PORT })
     port = next
     next.onMessage.addListener((message: ToStatusPage) => {
-      if (message.type === "agents") setState(message.state)
-      for (const listener of listeners) listener(message)
+      if (port === next && message.type === "agents") setState(message.state)
     })
     next.onDisconnect.addListener(() => {
       void chrome.runtime.lastError
-      for (const listener of listeners) listener(undefined)
-      if (port === next) setTimeout(connect, 300)
+      if (port !== next || stopped) return
+      port = undefined
+      setState(undefined)
+      timer = setTimeout(connect, 300)
     })
   }
   connect()
-  return {
-    state,
-    send: (message: FromStatusPage) => port?.postMessage(message),
-    onMessage(listener: (message: ToStatusPage | undefined) => void) {
-      listeners.add(listener)
-      onCleanup(() => listeners.delete(listener))
-    },
-  }
+  onCleanup(() => { stopped = true; clearTimeout(timer); port?.disconnect(); port = undefined })
+  return { state, send: (message: FromStatusPage) => port?.postMessage(message) }
 }
-export type Relay = ReturnType<typeof createRelay>
 
 /** A chrome.storage.local key as a signal: `read` turns what's stored (or nothing) into the value. */
 export function createStored<T>(key: string, read: (stored: unknown) => T) {
@@ -72,36 +64,6 @@ export function Rich(props: { text: string }) {
   )
 }
 
-/** A label that says what a button just did, then goes back. */
-export function createFlash(label: string, done: string) {
-  const [text, setText] = createSignal(label)
-  let timer: ReturnType<typeof setTimeout> | undefined
-  const flash = () => {
-    setText(done)
-    clearTimeout(timer)
-    timer = setTimeout(() => setText(label), 1500)
-  }
-  onCleanup(() => clearTimeout(timer))
-  return [text, flash] as const
-}
-
-/** A command or prompt to copy, in monospace, with a Copy button. */
-export function CopyBox(props: { text: string; label?: string }) {
-  const [label, flash] = createFlash("复制", "已复制")
-  return (
-    <div class="copy-box" aria-label={props.label}>
-      <code>{props.text}</code>
-      <Button
-        size="small"
-        variant="ghost"
-        icon={label() === "已复制" ? "check" : "copy"}
-        onClick={() => void navigator.clipboard.writeText(props.text).then(flash)}
-      >
-        {label()}
-      </Button>
-    </div>
-  )
-}
 
 /** 共用产品标识与页面导航。 */
 export function Brand(props: { page?: string; end?: JSX.Element }) {

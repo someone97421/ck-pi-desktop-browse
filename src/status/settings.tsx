@@ -1,8 +1,4 @@
-// The settings page (settings.html, the extension's options page). One card: the connection's state at the top, then a
-// row per setting (this browser's name, where agent tabs open and how they're grouped and closed, human-like
-// input and handoff notifications, updates), then an Advanced section for the relay's address and pairing
-// code, reconnect and diagnostics. Each row is a chrome.storage.local key the background reads when it needs it (or
-// sends to the relay, for input); a setting the relay's environment fixes is shown as such.
+// 主程序专用连接状态与浏览器操作偏好。
 import { createSignal, Show, type JSX } from "solid-js"
 import { render } from "solid-js/web"
 import { Button } from "@opencode/ui/button"
@@ -21,21 +17,17 @@ import {
   IDLE_MINUTES_KEY,
   agentGrouping,
   agentWindowPlacement,
-  cliUpdateNotice,
   handoffNotifications,
   humanInput,
   idleMinutesSetting,
   type AgentGrouping,
-  type AgentRelayState,
   type AgentWindowPlacement,
-  type AutoUpdateMode,
   type RelayOverrides,
 } from "../shared/protocol"
-import { unpackedExtensionId } from "../../cli/src/protocol"
 import { DEFAULT_SERVER_ORIGIN, SERVER_ORIGIN_KEY, normalizeServerOrigin } from "../sidepanel/config"
-import { cliUpdateText, describeStatus } from "./describe"
-import { RelayForm } from "./relay-form"
-import { applyColorScheme, Brand, CopyBox, createRelay, createStored, Note, Rich } from "./ui"
+import { browserStatusText, describeStatus } from "./describe"
+import { createDesktopService, desktopServiceText, openDesktopSidepanel } from "./desktop"
+import { applyColorScheme, Brand, createRelay, createStored, Note, Rich } from "./ui"
 import { ElementSettings } from "./element-settings"
 import "./settings.css"
 
@@ -43,6 +35,10 @@ import "./settings.css"
 function Settings() {
   const relay = createRelay()
   const state = relay.state
+  const desktop = createDesktopService()
+  const open = () => void openDesktopSidepanel().catch(() => {
+    showToast({ title: "请点击扩展图标打开侧栏", variant: "error" })
+  })
 
   const [agentWindow, setAgentWindow] = createStored(AGENT_WINDOW_KEY, agentWindowPlacement)
   const [grouping, setGrouping] = createStored(AGENT_GROUPING_KEY, agentGrouping)
@@ -76,15 +72,7 @@ function Settings() {
     })
   }
 
-  const reconnect = () => relay.send({ type: "agents.reconnect" })
-  const action = () => primaryAction(state())
-
-  // The pairing code fields live in Advanced; the pair action brings them into view.
-  let advanced!: HTMLDetailsElement
-  const openAdvanced = () => {
-    advanced.open = true
-    advanced.scrollIntoView({ block: "nearest", behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth" })
-  }
+  const reconnect = () => { desktop.check(); relay.send({ type: "agents.reconnect" }) }
 
   const copyDiagnostics = () =>
     void chrome.runtime
@@ -103,51 +91,18 @@ function Settings() {
       />
 
       <section class="card">
-        <header class="card-head" data-state={state()?.status ?? "connecting"}>
+        <header class="card-head" data-state={desktop.status() === "available" ? "connected" : desktop.status() === "checking" ? "connecting" : "offline"}>
           <div class="head-line">
             <span class="dot" aria-hidden="true" />
-            <h1 class="head-status">{statusText(state())}</h1>
-            <Show when={action()}>
-              {(kind) => (
-                <Button
-                  class="head-action"
-                  variant="neutral"
-                  size="small"
-                  icon={kind() === "reconnect" ? "refresh" : undefined}
-                  onClick={kind() === "pair" ? openAdvanced : reconnect}
-                >
-                  {kind() === "pair" ? "使用配对码" : "重新连接"}
-                </Button>
-              )}
-            </Show>
+            <h1 class="head-status">{desktopServiceText(desktop.status())}</h1>
+            <Button class="head-action" variant="neutral" size="small" onClick={open}>打开侧栏</Button>
           </div>
-          <Show when={statusDetail(state())}>
-            {(detail) => (
-              <p class="head-sub">
-                <Rich text={detail()} />
-              </p>
-            )}
+          <p class="head-sub hint">{desktop.origin()}</p>
+          <p class="head-sub hint">{browserStatusText(state(), desktop.local())}。{describeStatus(state(), desktop.local())}</p>
+          <Show when={desktop.status() === "unavailable"}>
+            <Note tone="warn">请启动「这是一个助手」，确认「局域网远程控制」插件已启用，并核对服务地址。</Note>
           </Show>
         </header>
-
-        <Show when={cliUpdateNotice(state()?.autoUpdate)}>
-          {(notice) => (
-            <div class="head-notice">
-              <Note tone="warn">
-                <Rich text={cliUpdateText(notice())} />
-              </Note>
-            </div>
-          )}
-        </Show>
-
-        <Show when={state()?.update}>
-          {(update) => (
-            <Section title="有可用更新">
-              <p class="row-desc hint">请在终端执行以下命令，手动更新 Browse CLI：</p>
-              <CopyBox text={update().command} />
-            </Section>
-          )}
-        </Show>
 
         <Section title="当前浏览器">
           <Row
@@ -171,7 +126,7 @@ function Settings() {
           </Row>
         </Section>
         <Section title="桌面服务">
-          <Row label="服务地址" description="侧栏所连接的桌面服务（Harness）地址。">
+          <Row label="服务地址" description="「这是一个助手」主程序的服务地址；连接其他电脑时，在侧栏使用主机密码登录。">
             <form class="name-form" onSubmit={saveHarnessOrigin}>
               <TextInput
                 value={harnessOrigin() ?? storedHarnessOrigin()}
@@ -245,60 +200,19 @@ function Settings() {
           </Row>
         </Section>
 
-        <Show when={state()?.autoUpdate?.install === "npm" && state()?.autoUpdate}>
-          {(autoUpdate) => (
-            <Section title="更新">
-              <Row label="发现新版本时" description={updateFacts(autoUpdate())}>
-                <SegmentedControl
-                  class="seg-update"
-                  value={autoUpdate().mode}
-                  onChange={(value) => {
-                    if (value === "on" || value === "notify" || value === "off") relay.send({ type: "autoUpdate.set", mode: value })
-                  }}
-                >
-                  <SegmentedControlItem value="on">安装</SegmentedControlItem>
-                  <SegmentedControlItem value="notify">仅提醒</SegmentedControlItem>
-                  <SegmentedControlItem value="off">关闭</SegmentedControlItem>
-                </SegmentedControl>
-              </Row>
-              <Show when={autoUpdate().overriddenBy}>
-                {(variable) => (
-                  <Note tone="warn">
-                    当前生效：
-                    {({ on: "自动安装", notify: "仅提醒", off: "关闭" } satisfies Record<AutoUpdateMode, string>)[autoUpdate().effective]}。
-                    由中继环境变量 <code>{variable()}</code> 指定。
-                  </Note>
-                )}
-              </Show>
-            </Section>
-          )}
-        </Show>
 
         <div class="hr" />
-        <details class="advanced" ref={advanced}>
+        <details class="advanced">
           <summary class="advanced-summary">
             <span class="advanced-title">高级设置</span>
-            <span class="advanced-hint">中继地址、配对码与诊断</span>
+            <span class="advanced-hint">重新检测与诊断</span>
             <Icon class="advanced-chevron" name="chevron-down" size="small" />
           </summary>
           <div class="advanced-body">
-            <Show when={state()}>
-              {(current) => (
-                <p class="advanced-status" data-state={state()?.status}>
-                  <span class="dot" aria-hidden="true" />
-                  <span>
-                    <Rich text={describeStatus(current(), chrome.runtime.id === unpackedExtensionId)} />
-                  </span>
-                </p>
-              )}
-            </Show>
-            <RelayForm relay={relay} />
-            <p class="row-desc hint">
-              <Rich text="连接其他计算机：在该计算机运行 `browse set hostname 0.0.0.0`，填写其 Tailscale IP 或主机名。首次配对或取消配对后，运行 `browse pair` 获取配对码（10 分钟内有效，仅可用一次）。" />
-            </p>
+            <p class="advanced-status hint">{describeStatus(state(), desktop.local())}</p>
             <div class="actions">
               <Button variant="neutral" icon="refresh" onClick={reconnect}>
-                重新连接
+                重新检测
               </Button>
               <Button
                 variant="neutral"
@@ -322,7 +236,7 @@ function Settings() {
 
       <ElementSettings />
 
-      <footer class="settings-foot hint">共享当前标签页：点击工具栏中的「这是一个助手」扩展图标。</footer>
+      <footer class="settings-foot hint">点击扩展图标打开侧栏；网页引用会发送到侧栏当前对话。</footer>
       <Toast.Region />
     </main>
   )
@@ -360,55 +274,6 @@ function Row(props: { label: string; description?: string; children: JSX.Element
   )
 }
 
-/** The connection in a few words, for the top of the card; Advanced has the long version. */
-function statusText(state: AgentRelayState | undefined) {
-  if (state === undefined) return "正在连接中继…"
-  const remote = state.relay.remote ? state.relay.address : undefined
-  switch (state.status) {
-    case "connected":
-      return remote ? `已连接中继 ${remote}` : "已连接本机中继"
-    case "connecting":
-      return "正在连接中继…"
-    case "conflict":
-      return "其他浏览器正在使用中继"
-    case "incompatible":
-      return "扩展与中继版本不兼容"
-    case "unpaired":
-      return "尚未与中继配对"
-    case "untrusted":
-      return "中继未接受此浏览器"
-    default:
-      return remote ? `正在等待中继 ${remote}` : "正在等待智能体"
-  }
-}
-
-/** The line under the status: where this browser stands, or the one thing to do next. Text in backticks shows as code. */
-function statusDetail(state: AgentRelayState | undefined) {
-  if (state === undefined) return undefined
-  const remote = state.relay.remote ? state.relay.address : undefined
-  switch (state.status) {
-    case "connected":
-      return state.browser ? `智能体通过 \`${state.browser.id}\` 识别此浏览器。` : "暂无智能体使用标签页。"
-    case "offline":
-      return remote
-        ? "远程智能体首次使用 Browse 工具时，中继会启动。"
-        : "智能体首次使用 Browse 工具时，中继会启动。"
-    case "conflict":
-      return "请关闭其他浏览器或用户配置中的此扩展，然后重新连接。"
-    case "incompatible":
-      return "请手动更新此扩展与本机 Browse CLI。"
-    case "unpaired":
-      return "配对后，智能体才能使用此浏览器。"
-    case "untrusted":
-      return "请在中继所在计算机运行 `browse pair`，输入新的配对码。"
-    default:
-      return undefined
-  }
-}
-
-/** The one action the state calls for, if any. */
-const primaryAction = (state: AgentRelayState | undefined) =>
-  state?.status === "unpaired" || state?.status === "untrusted" ? "pair" : state?.status === "conflict" || state?.status === "incompatible" ? "reconnect" : undefined
 
 // A setting the relay's environment fixes wins over the page's; say so, with the value in effect.
 const overrideNotes: { [Key in keyof RelayOverrides]-?: { variable: string; labels: Record<NonNullable<RelayOverrides[Key]>, string> } } = {
@@ -429,16 +294,6 @@ function Override(props: { overrides: RelayOverrides | undefined; setting: keyof
   )
 }
 
-/** The relay's update state, in a sentence or two. */
-function updateFacts(autoUpdate: NonNullable<AgentRelayState["autoUpdate"]>) {
-  return [
-    autoUpdate.version ? `已安装：${autoUpdate.version}${autoUpdate.channel === "dev" ? "（开发版）" : ""}。` : "",
-    autoUpdate.pending ? `${autoUpdate.pending} 已就绪，将在智能体停止使用浏览器后切换。` : "",
-    !autoUpdate.pending && autoUpdate.latest && autoUpdate.latest !== autoUpdate.version ? `最新版本：${autoUpdate.latest}。` : "",
-  ]
-    .filter(Boolean)
-    .join(" ")
-}
 
 applyColorScheme()
 render(() => <Settings />, document.getElementById("root")!)
