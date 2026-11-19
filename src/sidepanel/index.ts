@@ -1,7 +1,6 @@
 import { SIDEPANEL_PORT, type ActiveTabInfo, type AgentRelayState, type FromSidepanel, type ToSidepanel } from "../shared/protocol"
 import type { BrowserReference } from "../shared/browser-reference"
 import { apiOrigin, frameUrl, isLoopbackOrigin, loadServerOrigin } from "./config"
-import { extensionSession } from "./session"
 import { browserContext, confirmedInsertion, needsPairing, pairingAddress, tabReference, validFrameMessage, type RemoteStatus } from "./context"
 
 const frame = document.getElementById("renderer") as HTMLIFrameElement
@@ -14,7 +13,6 @@ let browserTabs: BrowserReference[] = [], browserTabsActive = false
 let browserId = "", browserTabsError: string | undefined
 let relayResult: { resolve: (status: string) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> } | undefined
 let pairingTask: Promise<void> | undefined
-let extensionSessionTask: Promise<string> | undefined
 let contextStarted = false, contextStarting = false, lastContextAttempt = 0
 let composerDraftKey = "", contextDraftKey = ""
 let frameResponded = false, frameChecking = false, frameLoadedAt = Date.now()
@@ -99,23 +97,11 @@ function resetFrameRequests() {
 function respond(requestId: string, ok: boolean, result?: unknown, error?: unknown) {
   frame.contentWindow?.postMessage({ type: "pi-desktop:browse-response", requestId, ok, ...(ok ? { result } : { error: error instanceof Error ? error.message : String(error ?? "操作失败") }) }, apiOrigin())
 }
-async function handleExtensionSession(requestId: string) {
-  const target = frame.contentWindow, origin = apiOrigin()
-  try {
-    extensionSessionTask ??= extensionSession(origin).finally(() => { extensionSessionTask = undefined })
-    const token = await extensionSessionTask
-    target?.postMessage({ type: "pi-desktop:extension-session-response", requestId, ok: true, token }, origin)
-  } catch (error) {
-    target?.postMessage({ type: "pi-desktop:extension-session-response", requestId, ok: false, error: error instanceof Error ? error.message : String(error) }, origin)
-  }
-}
 window.addEventListener("message", (event) => {
   if (!validFrameMessage(event, frame.contentWindow, apiOrigin())) return
   frameResponded = true
   const data = event.data
-  if (data.type === "pi-desktop:extension-session-request" && typeof data.requestId === "string") {
-    void handleExtensionSession(data.requestId)
-  } else if (data.type === "pi-desktop:remote-status") {
+  if (data.type === "pi-desktop:remote-status") {
     const justAuthenticated = data.authenticated === true && !auth.authenticated
     auth = { authenticated: data.authenticated === true, online: data.online === true, canCompose: data.canCompose === true }
     composerDraftKey = typeof data.draftKey === "string" ? data.draftKey : ""

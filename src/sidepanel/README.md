@@ -6,13 +6,11 @@
 
 自动准备调试服务与配对仅在主程序服务地址为回环地址时执行。本机侧栏遇到旧远程 Relay 配置时，先通过主程序准备本机服务，再通过后台共用连接任务切换；多窗口不并发覆盖配对信息。主程序服务位于其他电脑时，保留对话与已有调试连接，不自动替换调试地址。
 
-iframe 地址为 `/?webRemote=true&parentOrigin=chrome-extension://<扩展ID>`。本机地址（`localhost`、`127.0.0.0/8`、`[::1]`）由 iframe 请求扩展会话，扩展在真实 `chrome-extension://` 上下文中向已配置的 API origin 发送 `POST /api/extension-session`，使用 `Content-Type: application/json` 和空对象请求体。服务端须核对真实允许的扩展 Origin 和 loopback socket；返回 `{ok:true,result:{token,deviceId,deviceName,expiresAt}}`。扩展只提取 `result.token` 传回 iframe，令牌仅在内存中流转，不写 storage；请求不带 Cookie、禁止重定向并在 12 秒后超时。跨机地址继续在 iframe 内使用主机密码登录。IPC 与附件请求仍由 iframe 处理，双方验证 `event.source` 和精确 `event.origin`。
+iframe 地址为 `/?webRemote=true&parentOrigin=chrome-extension://<扩展ID>`。本机和跨机侧栏共用远控网页的登录表单，在 iframe 内提交 `POST /api/login`，请求体为 `{username,password,name}`。首次连接需要输入桌面远控的用户名和密码（默认用户名为 `admin`，可在桌面修改）。侧栏单独保存登录令牌，账号和令牌均不经过父窗消息。`parentOrigin` 用于消息路由，双方验证 `event.source` 和精确 `event.origin`。IPC 与附件请求仍由 iframe 处理。
 
 消息格式：
 
 - 父 → 子：`{type:"pi-desktop:status-request"}` 查询 Harness 状态。
-- 子 → 父：`{type:"pi-desktop:extension-session-request",requestId}` 请求本机免密码会话，仅接受当前 iframe 的精确 source／origin。
-- 父 → 子：`{type:"pi-desktop:extension-session-response",requestId,ok:true,token}` 或 `{type:"pi-desktop:extension-session-response",requestId,ok:false,error}`，`error` 为字符串；跨机请求返回密码登录提示，不访问会话端点。
 - 子 → 父：`{type:"pi-desktop:remote-status",authenticated,online,canCompose}`。
 - 父 → 子：`{type:"pi-desktop:browse-status",authenticated,online,busy,borrowed,browserContext}` 推送当前 tab 操作状态。
 - 子 → 父：`{type:"pi-desktop:browse-request",requestId,method}`，method 为 `toggleAttach`、`insertCurrent` 或 `handoff`。
@@ -25,9 +23,9 @@ Browse 操作收到请求后会先自动 ensure 或配对 Relay，再执行后�
 
 ## 浏览器引用
 
-扩展名称为“这是一个助手 · 浏览器”，设置、引导和通知使用中文及主程序图标。构建后在 Chrome 扩展管理页重新加载扩展，再打开侧栏；本机由主程序自动签发会话，跨机配置主程序服务地址并使用主机密码登录。同时需要包含扩展会话端点与浏览器引用 IPC 的新版主程序。
+扩展名称为“这是一个助手 · 浏览器”，设置、引导和通知使用中文及主程序图标。构建后在 Chrome 扩展管理页重新加载扩展，再打开侧栏。跨机使用时在扩展设置中填写桌面主机的局域网地址。主程序需要支持统一账号密码登录与浏览器引用 IPC。
 
-首次打开侧栏时，新版主程序创建独立的临时草稿；输入框就绪后，扩展自动接入当前普通网页进行调试，并把页面 chip 放入该草稿。首次发送才保存正式会话。自动初始化只在本次侧栏页面启动时执行，之后切换页面或短暂重连不会另建对话，也不会覆盖用户已经切换到的会话。Chrome 内部页面等受限地址不自动调试。
+侧栏首次登录后，新版主程序创建独立的临时草稿。输入框就绪后，扩展自动接入当前普通网页进行调试，并把页面 chip 放入该草稿。首次发送才保存正式会话。自动初始化只在本次侧栏页面启动时执行，之后切换页面或短暂重连不会另建对话，也不会覆盖用户已经切换到的会话。Chrome 内部页面等受限地址不自动调试。
 
 侧栏开启且在线时，桌面和侧栏 Composer 输入 `@` 均可搜索所有已打开标签页的标题或 URL，插入页面 chip；不需要先借出标签页。页面、选文、DOM 三类 chip 使用不同图标，悬停可查看完整引用。
 
@@ -39,14 +37,14 @@ Browse 操作收到请求后会先自动 ensure 或配对 Relay，再执行后�
 
 页面发送、选文和 DOM 捕捉默认写入接收侧栏的当前对话，在其最近草稿光标或选区插入；桌面输入框是否聚焦不影响该目标。工具栏“当前页”也沿用此目标。切换草稿、连接断开或未收到确认时明确失败。发送优先通过来源窗口的在线侧栏转发，没有时可使用其他窗口唯一的在线侧栏。Chrome 受保护页面和关闭的 Shadow DOM 不支持完整拾取。
 
-连接恢复保持当前 Renderer 与草稿：WebSocket 心跳同时续期标签列表，重连后立即重注册输入框；本机扩展会话失效时重新申请内存令牌，不刷新页面。桥接等待令牌 15 秒，覆盖扩展请求的 12 秒超时，同一次并发申请共用请求。若主程序尚未启动导致 iframe 首次加载失败，侧栏定期检查健康端点，主程序恢复后重新加载尚未建立连接的页面。
+WebSocket 短暂断线时保留当前 Renderer 与草稿，心跳同时续期标签列表，重连后立即重注册输入框。登录失效后会清除侧栏令牌并重新显示登录表单。若主程序尚未启动导致 iframe 首次加载失败，侧栏定期检查健康端点，主程序恢复后重新加载尚未建立连接的页面。
 
 验证命令：
 
 ```sh
 bun run typecheck
 bun run build
-bun test ./test/sidepanel.test.ts ./test/sidepanel-session.test.ts ./test/browser-references.test.ts ./test/element-picker-state.test.ts
+bun test ./test/sidepanel.test.ts ./test/browser-references.test.ts ./test/element-picker-state.test.ts
 bun test ./test/isolated/sidepanel-frame.ts
 bun test ./test/isolated/sidepanel-background.ts
 ```

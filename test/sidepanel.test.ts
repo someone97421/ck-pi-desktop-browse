@@ -1,10 +1,14 @@
 import { describe, expect, test } from "bun:test"
 import { browserContext, needsPairing, pairingAddress, validFrameMessage } from "../src/sidepanel/context"
-import { DEFAULT_SERVER_ORIGIN, frameUrl, normalizeServerOrigin } from "../src/sidepanel/config"
+import { DEFAULT_SERVER_ORIGIN, frameUrl, isLoopbackOrigin, normalizeServerOrigin } from "../src/sidepanel/config"
 
 describe("侧边栏连接上下文", () => {
   test("缺省连接唯一的局域网远控服务 7878", () => {
     expect(DEFAULT_SERVER_ORIGIN).toBe("http://127.0.0.1:7878")
+  })
+  test("Relay 自动配对仅用于回环地址", () => {
+    for (const origin of ["http://127.0.0.1:7878", "http://127.0.0.2:7878", "https://localhost:7878", "http://[::1]:7878"]) expect(isLoopbackOrigin(origin)).toBe(true)
+    for (const origin of ["http://192.168.1.8:7878", "http://localhost.example:7878", "http://128.0.0.1:7878"]) expect(isLoopbackOrigin(origin)).toBe(false)
   })
   test("标题和 URL 中的换行、引号不能破坏当前页上下文", () => {
     const text = browserContext({ tabId: 42, title: '登录 "页面"\n下一行', url: 'https://example.test/?q="x"' })
