@@ -63,24 +63,27 @@ test("侧栏只通过 iframe 推送 Browse 状态并拒绝错误来源", async (
   expect(status).toMatchObject({ type: "pi-desktop:browse-status", borrowed: false, browserContext: expect.stringContaining("tab=42"), authenticated: false, online: false, busy: false })
 })
 
-test("首次输入框就绪后自动调试当前页并向侧栏插入一次 chip", async () => {
-  receive({ type: "pi-desktop:remote-status", authenticated: true, online: true, canCompose: false, draftKey: "temporary:startup" })
-  const before = background.filter(message => message.type === "tab.ensureAttached").length
-  expect(before).toBe(0)
-  receive({ type: "pi-desktop:remote-status", authenticated: true, online: true, canCompose: true, draftKey: "temporary:startup" })
+test("打开侧栏先调试当前页，草稿与标签列表就绪后插入一次 chip", async () => {
+  const insertions = () => messages.filter(item => item.message.method === "browser.insertReference")
+  receive({ type: "pi-desktop:remote-status", authenticated: true, online: true, canCompose: false, initialDraftKey: "temporary:startup" })
   const attach = background.findLast(message => message.type === "tab.ensureAttached")
   expect(attach).toMatchObject({ tabId: 42 })
   port.onMessage.emit({ type: "tab.result", requestId: attach.requestId, ok: true, tab: { tabId: 42, windowId: 7, title: "当前页", url: "https://example.test", attached: true, badge: "ON" } })
   await settle()
-  const insertion = messages.findLast(item => item.message.type === "pi-desktop:request" && item.message.method === "browser.insertReference")!.message
-  expect(insertion).toMatchObject({ target: "current", reference: { kind: "page", tabId: 42 } })
+  expect(insertions()).toHaveLength(0)
+  receive({ type: "pi-desktop:remote-status", authenticated: true, online: true, canCompose: true, draftKey: "temporary:startup" })
+  expect(insertions()).toHaveLength(0)
+  port.onMessage.emit({ type: "browser.tabs", active: true, browserId: "browser-7", tabs: [{ kind: "page", tabId: 42, windowId: 7, title: "当前页", url: "https://example.test" }] })
+  const insertion = insertions().at(-1)!.message
+  expect(insertion).toMatchObject({ target: "current", draftKey: "temporary:startup", reference: { kind: "page", tabId: 42 } })
   receive({ type: "pi-desktop:response", requestId: insertion.requestId, ok: true, result: { inserted: true, clientId: "sidebar-composer" } })
   await settle()
   receive({ type: "pi-desktop:remote-status", authenticated: true, online: false, canCompose: false, draftKey: "temporary:startup" })
   receive({ type: "pi-desktop:remote-status", authenticated: true, online: true, canCompose: true, draftKey: "temporary:startup" })
   agent("connected")
   await settle()
-  expect(background.filter(message => message.type === "tab.ensureAttached")).toHaveLength(before + 1)
+  expect(background.filter(message => message.type === "tab.ensureAttached")).toHaveLength(1)
+  expect(insertions()).toHaveLength(1)
 })
 
 test("iframe Browse 请求先经过后台并回传 response", async () => {

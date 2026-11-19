@@ -170,7 +170,7 @@ function connect() {
       browserTabsError = event.error
       browserTabsActive = event.active
       browserTabs = event.tabs
-      sendFrameTabs()
+      sendFrameTabs(); void initializeCurrentPage()
     }
     if (event.type === "reference.request") void forwardReference(event, connected)
     if (event.type === "picker.result" && pickerResults.delete(event.sessionId)) {
@@ -247,23 +247,31 @@ async function connectRelay() {
   } finally { pairing = false; sendFrameStatus() }
 }
 async function initializeCurrentPage() {
-  if (contextStarted || contextStarting || busy || !available() || !auth.canCompose || !relayConnected() || !port || !active) return
-  if (contextDraftKey && composerDraftKey !== contextDraftKey) { contextStarted = true; return }
-  if (!/^(https?|file):/.test(active.url) || Date.now() - lastContextAttempt < 5000) return
+  if (contextStarted || contextStarting || busy || !available() || !relayConnected() || !port || !active) return
+  if (!/^(https?|file):/.test(active.url)) return
   const selected = active, source = port
-  contextDraftKey ||= composerDraftKey
-  contextStarting = true; busy = true; lastContextAttempt = Date.now(); sendFrameStatus()
+  if (!selected.attached && Date.now() - lastContextAttempt < 5000) return
+  contextStarting = true
   try {
-    const tab = await request({ type: "tab.ensureAttached", tabId: selected.tabId })
-    if (!tab?.attached) throw new Error("当前页未确认进入调试状态")
-    if (source !== port || !available() || active?.tabId !== tab.tabId || active.url !== tab.url) return
-    if (contextDraftKey && composerDraftKey !== contextDraftKey) { contextStarted = true; return }
+    if (!selected.attached) {
+      busy = true; lastContextAttempt = Date.now(); sendFrameStatus()
+      const attached = await request({ type: "tab.ensureAttached", tabId: selected.tabId })
+      if (!attached?.attached) throw new Error("当前页未确认进入调试状态")
+      if (source !== port || !available() || active?.tabId !== attached.tabId || active.url !== attached.url) return
+      active = attached
+    }
+    if (!auth.canCompose || !browserTabsActive || !browserId || !composerDraftKey) return
+    if (contextDraftKey && composerDraftKey !== contextDraftKey) return
+    busy = true; sendFrameStatus()
     // 插入回执可能丢失，发出后不自动重放，以免生成重复 chip。
     contextStarted = true
-    await insertReference(tabReference(tab), "current", contextDraftKey || undefined)
+    await insertReference(tabReference(active), "current", composerDraftKey)
   } catch (error) {
     console.warn(contextStarted ? "侧栏网页引用未获确认，请检查草稿后使用当前页按钮重试" : "侧栏当前网页调试初始化失败，将在连接就绪后重试", error)
-  } finally { contextStarting = false; busy = false; sendFrameStatus() }
+  } finally {
+    contextStarting = false
+    if (busy) { busy = false; sendFrameStatus() }
+  }
 }
 
 async function recoverFrame() {
