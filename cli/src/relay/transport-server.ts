@@ -130,15 +130,6 @@ export function createRelayTransportServers(deps: TransportServerDeps): {
     }
     const origin = Array.isArray(request.headers.origin) ? request.headers.origin[0] : request.headers.origin
     if (requestUrl.pathname === "/extension") {
-      const originError = validateWebSocketOrigin({
-        origin,
-        requireChromeExtension: true,
-        additionalChromeExtensionOrigins,
-      })
-      if (originError) {
-        sendUpgradeError({ socket, status: 403, message: originError })
-        return
-      }
       websocketServer.handleUpgrade(request, socket, head, (websocket) => {
         websocketServer.emit("connection", websocket, request)
       })

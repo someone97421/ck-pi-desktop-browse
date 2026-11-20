@@ -80,19 +80,15 @@ export function validateBrowserFetchSite(request: http.IncomingMessage): string 
 export function validateWebSocketOrigin(options: {
   readonly origin: string | undefined
   readonly additionalChromeExtensionOrigins?: ReadonlySet<string>
-  readonly requireChromeExtension?: boolean
 }): string | undefined {
   if (!options.origin) {
-    return options.requireChromeExtension ? "Extension WebSocket origin is required" : undefined
+    return undefined
   }
   if (
     options.origin === stableUnpackedExtensionOrigin
     || options.additionalChromeExtensionOrigins?.has(options.origin)
   ) {
     return undefined
-  }
-  if (options.requireChromeExtension) {
-    return "Extension WebSocket origin is not allowed"
   }
   return "WebSocket origin is not allowed"
 }

@@ -1,26 +1,4 @@
-//! Request checks shared by the HTTP API and the extension WebSocket (cli/src/relay/origins.ts).
-
-use std::collections::HashSet;
-
-/// The chrome-extension origins allowed to open the extension socket: the unpacked build, the store item, and
-/// OPENCODE_BROWSER_EXTENSION_ORIGINS (comma or space separated, bare chrome-extension:// origins only).
-pub fn allowed_extension_origins() -> HashSet<String> {
-    origins_with_extra(std::env::var("OPENCODE_BROWSER_EXTENSION_ORIGINS").ok().as_deref())
-}
-
-fn origins_with_extra(extra: Option<&str>) -> HashSet<String> {
-    let mut origins: HashSet<String> = [crate::protocol::stable_unpacked_origin(), format!("chrome-extension://{}", crate::protocol::store_id())].into();
-    if let Some(raw) = extra {
-        for token in raw.split(|c: char| c == ',' || c.is_whitespace()) {
-            let value = token.trim();
-            let id = value.strip_prefix("chrome-extension://").unwrap_or("");
-            if !id.is_empty() && id.bytes().all(|b| (b'a'..=b'p').contains(&b)) {
-                origins.insert(value.to_string());
-            }
-        }
-    }
-    origins
-}
+//! Request checks for the relay's HTTP API (cli/src/relay/origins.ts).
 
 pub fn validate_host_header(host_header: Option<&str>, host: &str, port: u16) -> Result<(), &'static str> {
     let (hostname, header_port) = parse_host_header(host_header).ok_or("Invalid Host header")?;
@@ -76,14 +54,6 @@ pub fn validate_fetch_site(value: Option<&str>) -> Result<(), &'static str> {
     }
 }
 
-pub fn validate_extension_origin(origin: Option<&str>, allowed: &HashSet<String>) -> Result<(), &'static str> {
-    match origin {
-        None => Err("Extension WebSocket origin is required"),
-        Some(origin) if allowed.contains(origin) => Ok(()),
-        Some(_) => Err("Extension WebSocket origin is not allowed"),
-    }
-}
-
 pub fn is_local_peer(address: &std::net::SocketAddr) -> bool {
     match address.ip() {
         std::net::IpAddr::V4(ip) => ip.is_loopback(),
@@ -103,28 +73,5 @@ mod tests {
         assert!(validate_host_header(Some("evil.com:19988"), "127.0.0.1", 19988).is_err());
         assert!(validate_host_header(Some("127.0.0.1:1"), "127.0.0.1", 19988).is_err());
         assert!(validate_host_header(None, "127.0.0.1", 19988).is_err());
-    }
-
-    #[test]
-    fn extension_origins() {
-        let allowed = allowed_extension_origins();
-        assert!(validate_extension_origin(Some(&crate::protocol::stable_unpacked_origin()), &allowed).is_ok());
-        assert!(allowed.contains("chrome-extension://afeafocngkodbmaipcngoamamfmekgfo"));
-        assert!(allowed.contains(&format!("chrome-extension://{}", crate::protocol::store_id())));
-        assert!(validate_extension_origin(Some("https://example.com"), &allowed).is_err());
-        assert!(validate_extension_origin(None, &allowed).is_err());
-    }
-
-    #[test]
-    fn custom_origins_extend_the_defaults() {
-        let first = "chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
-        let second = "chrome-extension://bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
-        let allowed = origins_with_extra(Some(&format!("{first}, {second}\nhttps://example.com chrome-extension://abc/ chrome-extension://xyz")));
-        assert!(validate_extension_origin(Some(first), &allowed).is_ok());
-        assert!(validate_extension_origin(Some(second), &allowed).is_ok());
-        assert!(allowed.contains("chrome-extension://afeafocngkodbmaipcngoamamfmekgfo"));
-        for invalid in ["https://example.com", "chrome-extension://abc/", "chrome-extension://xyz"] {
-            assert!(validate_extension_origin(Some(invalid), &allowed).is_err());
-        }
     }
 }

@@ -427,10 +427,6 @@ fn legacy_route(path: &str) -> bool {
 
 fn upgrade_extension(relay: Arc<Relay>, peer: SocketAddr, mut request: Request<Incoming>) -> Response<Full<Bytes>> {
     let origin = header(&request, "origin").map(str::to_string);
-    if let Err(error) = crate::origins::validate_extension_origin(origin.as_deref(), &relay.origins) {
-        rlog!("extension.rejected", reason = error, origin = origin);
-        return json_response(StatusCode::FORBIDDEN, &json!({ "error": error }));
-    }
     let websocket = header(&request, "upgrade").is_some_and(|v| v.eq_ignore_ascii_case("websocket"));
     let Some(key) = header(&request, "sec-websocket-key").filter(|_| websocket).map(|k| derive_accept_key(k.as_bytes())) else {
         return json_response(StatusCode::BAD_REQUEST, &json!({ "error": "Expected a WebSocket upgrade" }));
