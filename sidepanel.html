@@ -11,6 +11,18 @@
   <script type="module" src="/src/sidepanel/index.ts"></script>
 </head>
 <body>
-  <iframe id="renderer" title="这是一个助手" referrerpolicy="no-referrer" allow="clipboard-write"></iframe>
+  <main id="connection-guide" aria-live="polite" aria-labelledby="guide-title">
+    <section class="guide-card">
+      <img class="guide-icon" src="/icons/icon-128.png" alt="" width="64" height="64" />
+      <span class="guide-eyebrow">这是一个助手 · 浏览器</span>
+      <h1 id="guide-title">正在连接主程序…</h1>
+      <p id="guide-detail">正在检测「这是一个助手」是否已启动。</p>
+      <div class="guide-actions">
+        <button id="retry-connection" type="button" disabled>检测中…</button>
+        <a href="settings.html">连接设置</a>
+      </div>
+    </section>
+  </main>
+  <iframe id="renderer" title="这是一个助手" referrerpolicy="no-referrer" allow="clipboard-write" hidden></iframe>
 </body>
 </html>

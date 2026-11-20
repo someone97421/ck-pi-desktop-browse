@@ -20,6 +20,15 @@ const server = "http://127.0.0.1:7878"
 const background: any[] = []
 const port = { onMessage: new StubEvent(), onDisconnect: new StubEvent(), postMessage: (message: unknown) => background.push(message) }
 let storedOrigin: string | undefined
+let desktopOnline = false
+const originalFetch = globalThis.fetch
+globalThis.fetch = (async () => {
+  if (!desktopOnline) throw new TypeError("fetch failed")
+  return {
+    ok: true,
+    json: async () => ({ ok: true, result: { protocolVersion: 2, authMode: "password" } }),
+  } as Response
+}) as typeof fetch
 const interval = globalThis.setInterval
 const timers: ReturnType<typeof setInterval>[] = []
 globalThis.setInterval = ((...args: Parameters<typeof setInterval>) => {
@@ -47,7 +56,27 @@ function agent(status: AgentRelayState["status"]) {
 }
 await import("../../src/sidepanel/index")
 await settle()
-afterAll(() => { for (const timer of timers) clearInterval(timer); globalThis.setInterval = interval })
+afterAll(() => {
+  for (const timer of timers) clearInterval(timer)
+  globalThis.setInterval = interval
+  globalThis.fetch = originalFetch
+})
+test("主程序离线时显示指引，重试成功并收到页面状态后才进入侧栏", async () => {
+  expect(frame.src).toBe("")
+  expect(frame.hidden).toBe(true)
+  expect(node("connection-guide").hidden).toBe(false)
+  expect(node("guide-title").textContent).toBe("主程序尚未启动")
+  expect(node("retry-connection").disabled).toBe(false)
+  desktopOnline = true
+  node("retry-connection").dispatchEvent(new Event("click"))
+  await settle()
+  expect(new URL(frame.src).searchParams.get("parentOrigin")).toBe(extensionOrigin)
+  expect(node("guide-title").textContent).toBe("正在连接主程序…")
+  expect(node("connection-guide").hidden).toBe(false)
+  receive({ type: "pi-desktop:remote-status", authenticated: false, online: false, canCompose: false })
+  expect(node("connection-guide").hidden).toBe(true)
+  expect(frame.hidden).toBe(false)
+})
 
 test("侧栏只通过 iframe 推送 Browse 状态并拒绝错误来源", async () => {
   expect(new URL(frame.src).searchParams.get("parentOrigin")).toBe(extensionOrigin)
@@ -257,6 +286,6 @@ test("显式取消与 iframe 重载会向后台结束当前捕捉", () => {
   const before = background.length
   frame.dispatchEvent(new Event("load"))
   expect(background.slice(before)).toContainEqual({ type: "picker.end", sessionId: "reload-drag", cancel: true })
-  expect(nodes.size).toBe(1)
+  expect(nodes.size).toBe(5)
   page.dispatchEvent(new Event("pagehide"))
 })

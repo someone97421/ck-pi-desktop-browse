@@ -4,6 +4,10 @@ import { apiOrigin, frameUrl, isLoopbackOrigin, loadServerOrigin } from "./confi
 import { browserContext, confirmedInsertion, needsPairing, pairingAddress, tabReference, validFrameMessage, type RemoteStatus } from "./context"
 
 const frame = document.getElementById("renderer") as HTMLIFrameElement
+const guide = document.getElementById("connection-guide") as HTMLElement
+const guideTitle = document.getElementById("guide-title") as HTMLElement
+const guideDetail = document.getElementById("guide-detail") as HTMLElement
+const retryConnection = document.getElementById("retry-connection") as HTMLButtonElement
 let auth: RemoteStatus = { authenticated: false, online: false, canCompose: false }
 let port: chrome.runtime.Port | undefined, windowId: number | undefined
 let state: AgentRelayState | undefined, active: ActiveTabInfo | null = null
@@ -51,6 +55,26 @@ window.addEventListener("keydown", (event) => { if (event.key === "Escape") endP
 document.addEventListener("visibilitychange", () => { if (document.hidden) endPick(true) })
 
 function available() { return auth.authenticated && auth.online && !suspended }
+function showGuide(checking: boolean, title: string, detail: string) {
+  frame.hidden = true
+  guide.hidden = false
+  guideTitle.textContent = title
+  guideDetail.textContent = detail
+  retryConnection.disabled = checking
+  retryConnection.textContent = checking ? "检测中…" : "重新连接"
+}
+function showConnecting() {
+  showGuide(false, "正在连接主程序…", "主程序已响应，正在打开侧栏。")
+}
+function showOffline() {
+  const local = isLoopbackOrigin(apiOrigin())
+  showGuide(false, local ? "主程序尚未启动" : "无法连接主程序",
+    local ? "启动「这是一个助手」后，侧栏会自动连接。" : "请确认主程序已启动，并在连接设置中核对服务地址。")
+}
+function showRenderer() {
+  guide.hidden = true
+  frame.hidden = false
+}
 function sendFrameStatus() {
   const current = active ? browserContext(active) : null
   frame.contentWindow?.postMessage({
@@ -103,6 +127,7 @@ window.addEventListener("message", (event) => {
   const data = event.data
   if (data.type === "pi-desktop:remote-status") {
     const justAuthenticated = data.authenticated === true && !auth.authenticated
+    showRenderer()
     auth = { authenticated: data.authenticated === true, online: data.online === true, canCompose: data.canCompose === true }
     composerDraftKey = typeof data.draftKey === "string" ? data.draftKey : ""
     if (!contextDraftKey && typeof data.initialDraftKey === "string") contextDraftKey = data.initialDraftKey
@@ -125,6 +150,7 @@ window.addEventListener("message", (event) => {
 })
 frame.addEventListener("load", () => {
   frameResponded = false; frameLoadedAt = Date.now(); contextStarted = false; lastContextAttempt = 0
+  showConnecting()
   composerDraftKey = ""; contextDraftKey = ""
   resetFrameRequests(); auth = { authenticated: false, online: false, canCompose: false }
   clearTabs(); announceReady(); sendFrameStatus()
@@ -274,17 +300,35 @@ async function initializeCurrentPage() {
   }
 }
 
-async function recoverFrame() {
-  if (suspended || frameResponded || frameChecking || !frame.src || Date.now() - frameLoadedAt < 15_000) return
+async function desktopHealthy() {
+  const response = await fetch(new URL("/api/health", apiOrigin()), {
+    cache: "no-store", credentials: "omit", redirect: "error", signal: AbortSignal.timeout(3000),
+  })
+  if (!response.ok) return false
+  const body: unknown = await response.json()
+  const health = body && typeof body === "object" && "ok" in body && body.ok === true && "result" in body ? body.result : undefined
+  return !!(health && typeof health === "object" && "protocolVersion" in health && health.protocolVersion === 2
+    && "authMode" in health && health.authMode === "password")
+}
+async function syncFrame(force = false) {
+  if (suspended || frameChecking || (frameResponded && !force)) return
   frameChecking = true
+  showGuide(true, "正在连接主程序…", "正在检测「这是一个助手」是否已启动。")
   try {
-    const response = await fetch(new URL("/api/health", apiOrigin()), { cache: "no-store", credentials: "omit", signal: AbortSignal.timeout(3000) })
-    if (response.ok && !frameResponded && !suspended) {
+    const healthy = await desktopHealthy()
+    if (suspended) return
+    if (!healthy) {
+      if (!frameResponded) showOffline()
+      return
+    }
+    if (!frame.src || (!frameResponded && (force || Date.now() - frameLoadedAt >= 15_000))) {
       frameLoadedAt = Date.now()
       frame.src = frameUrl(apiOrigin(), chrome.runtime.getURL("").replace(/\/$/, ""))
     }
-  } catch { /* 主程序尚未启动，保留侧栏并等待下一次检查。 */ }
-  finally { frameChecking = false }
+    if (!frameResponded) showConnecting()
+  } catch {
+    if (!suspended && !frameResponded) showOffline()
+  } finally { frameChecking = false }
 }
 async function autoPair() {
   if (!isLoopbackOrigin(apiOrigin()) || !auth.authenticated || !auth.online || !state || !port || pairing || ensuring) return
@@ -325,15 +369,23 @@ window.addEventListener("pageshow", () => {
   if (!port) connect()
   else announceReady()
   frame.contentWindow?.postMessage({ type: "pi-desktop:status-request" }, apiOrigin())
+  void syncFrame()
 })
 setInterval(() => {
   if (suspended) return
-  void autoPair(); void initializeCurrentPage(); void recoverFrame()
+  void autoPair(); void initializeCurrentPage(); void syncFrame()
 }, 5000)
+retryConnection.addEventListener("click", () => {
+  if (port) { try { send({ type: "agents.reconnect" }) } catch {} }
+  void syncFrame(true)
+})
 async function boot() {
   await loadServerOrigin()
   windowId = (await chrome.windows.getCurrent()).id
-  frame.src = frameUrl(apiOrigin(), chrome.runtime.getURL("").replace(/\/$/, ""))
   connect(); announceReady(); sendFrameStatus()
+  await syncFrame(true)
 }
-void boot().catch((error: unknown) => console.error("侧栏启动失败", error))
+void boot().catch((error: unknown) => {
+  showOffline()
+  console.error("侧栏启动失败", error)
+})
