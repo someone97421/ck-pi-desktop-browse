@@ -1,9 +1,12 @@
 # 这是一个助手 · 浏览器扩展（CK Browse）
 
+> **[从 Chrome Web Store 安装扩展](https://chromewebstore.google.com/detail/mcjemookipgeonbaicbjomlfhkmbnfef)（推荐）**
+
 这是 [「这是一个助手」桌面应用](https://github.com/someone97421/CK-PI-Desktop) 的配套 Chromium 扩展，也是 Browse 的个人 fork。它把桌面应用的聊天界面放进浏览器侧栏，让助手操作浏览器，并把标签页、选中文字和网页元素直接引用到聊天输入框。
 
+- [Chrome Web Store 发布页](https://chromewebstore.google.com/detail/mcjemookipgeonbaicbjomlfhkmbnfef)
 - [桌面主程序](https://github.com/someone97421/CK-PI-Desktop)
-- [扩展下载](https://github.com/someone97421/ck-pi-desktop-browse/releases)
+- [GitHub 手动安装包](https://github.com/someone97421/ck-pi-desktop-browse/releases)
 - [本扩展源码](https://github.com/someone97421/ck-pi-desktop-browse)
 
 ## 可以做什么
@@ -21,7 +24,11 @@ DOM 准星入口只显示在 Chrome 扩展侧栏中；扩展设置可以关闭�
 
 ## 安装扩展
 
-1. 先安装并启动 [「这是一个助手」桌面应用](https://github.com/someone97421/CK-PI-Desktop)，再从本仓库的 [Releases](https://github.com/someone97421/ck-pi-desktop-browse/releases) 下载最新的 `browse-extension-版本号.zip`。扩展只提供 ZIP 手动安装包，不提供 CRX 或 Chrome 商店安装。
+推荐直接从 **[Chrome Web Store](https://chromewebstore.google.com/detail/mcjemookipgeonbaicbjomlfhkmbnfef)** 安装扩展，再安装并启动 [「这是一个助手」桌面应用](https://github.com/someone97421/CK-PI-Desktop)。点击浏览器工具栏中的扩展图标即可打开侧栏。
+
+### 从 GitHub 手动安装
+
+1. 从本仓库的 [Releases](https://github.com/someone97421/ck-pi-desktop-browse/releases) 下载最新的 `browse-extension-版本号.zip`。手动安装包保留固定扩展 ID，不提供 CRX。
 2. 将 ZIP 解压到一个固定目录。不要直接选择 ZIP 文件，也不要在安装后移动或删除该目录。
 3. 在 Chrome 或其他 Chromium 浏览器打开 `chrome://extensions`，启用「开发者模式」，点击「加载已解压的扩展程序」，选择包含 `manifest.json` 的解压目录。
 4. 安装后的引导显示主程序服务可用性和浏览器调试状态，可打开侧栏、重新检测或进入设置。点击扩展图标也可打开侧栏。升级时下载新版 ZIP，解压并替换原目录内容，再在扩展管理页点击「重新加载」。
